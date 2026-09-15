@@ -139,6 +139,14 @@ inherently manual) could shorten this for whoever builds the second
 integration. This is a genuine Phase 3 (Enablement) candidate, not
 something to build now.
 
+**Acted on 2026-09-15:** Wrote
+`docs/runbooks/salesforce-non-interactive-auth-setup.md` and
+`docs/runbooks/servicenow-non-interactive-auth-setup.md`, capturing the
+actual steps and gotchas hit in this session (including FL-0002/FL-0007's
+UI-drift lesson and FL-0010's scope limitation) rather than idealized
+generic instructions. Both Phase 3 candidates from this review are now
+acted on.
+
 ---
 
 ### LL-0004: Scripting repetitive platform setup via its own API beat manual UI clicking

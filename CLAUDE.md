@@ -26,16 +26,23 @@ Definition of Success," achieved. See `docs/devex/observations.md`
 **Phase 2 (Observation Review) has been done once** — see
 `docs/devex/lessons-learned.md` for the classification and four lessons
 (LL-0001–LL-0004) synthesized from the Phase 1 friction/observations so
-far. **Phase 3 (Enablement) has started on one of the two candidates:**
-`scripts/lib/salesforceTooling.ts` plus
-`scripts/verify-recent-incidents.ts` (LL-0004). Kept local to this
-service, not a shared cross-service package — there's still only one real
-consumer, so that remains premature until Phase 5 (the SharePoint
-integration) needs it. The other Phase 3 candidate (a per-platform
-non-interactive-auth checklist, LL-0003) is not built. Re-run the
-Observation Review as more friction accumulates, per the Observation →
-Enablement → Mastery → Observation cycle. Not yet built: retry /
-dead-letter handling, idempotency, and tests. See
+far. **Both Phase 3 (Enablement) candidates from that review are now
+acted on:**
+
+- LL-0004: `scripts/lib/salesforceTooling.ts` +
+  `scripts/verify-recent-incidents.ts`, kept local to this service (not a
+  shared cross-service package — only one real consumer exists so far,
+  so generalizing further stays premature until Phase 5, the SharePoint
+  integration, needs it).
+- LL-0003: `docs/runbooks/salesforce-non-interactive-auth-setup.md` and
+  `docs/runbooks/servicenow-non-interactive-auth-setup.md`.
+
+Re-run the Observation Review as more friction accumulates, per the
+Observation → Enablement → Mastery → Observation cycle — retry/idempotency
+work (not yet started) would be a good source of the next round, since
+that friction hasn't actually been experienced yet (only anticipated),
+per this file's Developer #1 principle. Not yet built: retry / dead-letter
+handling, idempotency, and tests. See
 `services/integration-service/README.md` for current status.
 
 A Salesforce Developer Edition org (External Client App, JWT Bearer Flow)

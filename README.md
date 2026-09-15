@@ -60,20 +60,30 @@ correlation IDs, testing, CI/CD, IaC, etc.) are documented in
 
 ```
 .
-├── CLAUDE.md          # Project charter, philosophy, phases, and constraints
-├── README.md          # This file
-└── docs/
-    └── devex/         # Developer experience journal
-        ├── observations.md      # Raw, chronological observations
-        ├── friction-log.md      # Friction items (Observation/Friction/Impact/Enablement)
-        ├── decisions.md         # Lightweight, working-level decisions
-        └── lessons-learned.md   # Synthesized patterns once evidence accumulates
+├── CLAUDE.md                     # Project charter, philosophy, phases, and constraints
+├── README.md                     # This file
+├── docs/
+│   ├── decisions/                # Architecture Decision Records (ADRs)
+│   ├── runbooks/                 # Platform setup checklists (Phase 3 Enablement)
+│   └── devex/                    # Developer experience journal
+│       ├── observations.md       # Raw, chronological observations
+│       ├── friction-log.md       # Friction items (Observation/Friction/Impact/Enablement)
+│       ├── decisions.md          # Lightweight, working-level decisions
+│       └── lessons-learned.md    # Synthesized patterns, classified during Phase 2 review
+└── services/
+    └── integration-service/      # Node.js + TypeScript: Salesforce -> ServiceNow
 ```
-
-No source code, build tooling, or tests exist yet — the project is
-currently in Phase 0 (Baseline). See `CLAUDE.md` for the full phase roadmap.
 
 ## Status
 
-Pre-implementation. See `docs/devex/` for the developer experience journal
-as work begins on the first integration.
+**Phase 1's first milestone is done: the full chain works.** A real
+Salesforce Platform Event is published, received via the Pub/Sub API, and
+used to create a real ServiceNow Incident, end-to-end. A Phase 2
+Observation Review has been completed, and both Phase 3 Enablement
+candidates it identified have been built (see
+[`docs/devex/lessons-learned.md`](./docs/devex/lessons-learned.md)).
+
+See [`CLAUDE.md`](./CLAUDE.md) ("Current Repository State") for the
+up-to-date detail, and
+[`services/integration-service/README.md`](./services/integration-service/README.md)
+for how to run it.
