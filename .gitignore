@@ -18,6 +18,10 @@ Thumbs.db
 # Logs
 *.log
 
-# NOTE: no language/build tooling has been chosen yet (see CLAUDE.md,
-# "Current Repository State"). Add language- and tool-specific ignores
-# (e.g. node_modules/, target/, .terraform/) once that tooling exists.
+# Node.js (services/integration-service)
+node_modules/
+dist/
+npm-debug.log*
+
+# NOTE: add further language/tool-specific ignores (e.g. target/,
+# .terraform/) as more services/tooling are introduced.

@@ -4,22 +4,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 # Current Repository State
 
-As of this writing, the repository contains only this file. There is no
-source code, build tooling, package manifest, test suite, or README yet.
+We are in **Phase 1 — Developer Experience** (see "Golden Path Evolution"
+below). One service exists so far:
 
-Because of that:
+    services/integration-service/   Node.js + TypeScript
 
-- There are no build/lint/test commands to document. Do not invent any.
-- There is no code architecture to describe. Do not invent any.
+It is scaffolding only — it does not work end-to-end yet. It stubs a
+Salesforce Pub/Sub API subscriber for the `DistributorOnboardingRequested`
+event (see `docs/decisions/0001-integration-architecture.md`) and logs
+received events; it does not yet implement real Salesforce authentication,
+call ServiceNow, or handle retries/idempotency. See
+`services/integration-service/README.md` and
+`docs/devex/friction-log.md` (FL-0001) for the current state and what's
+blocking further progress.
 
-When source code, a package manifest (e.g. `package.json`, `pom.xml`,
-`build.gradle`, `requirements.txt`), or a README is added to this repository,
-update this file with the real commands (build, lint, test, run a single
-test) and a description of the actual multi-file architecture — derived from
-what is actually present, not from the aspirational structure sketched below.
+Commands (from `services/integration-service/`):
 
-Until then, consult the sections below for project intent, philosophy, and
-constraints before writing any code.
+    npm install     # install dependencies
+    npm run dev      # run with ts-node
+    npm run build    # compile to dist/
+    npm start        # run compiled output
+
+There is no lint or test tooling yet — do not invent commands for either.
+No other services exist yet. When more are added, or lint/test tooling is
+introduced, update this section with the real commands and architecture
+rather than the aspirational structure sketched later in this file.
 
 # Golden Vine Integration Golden Path
 

@@ -53,4 +53,38 @@ _Do not implement this automatically. Observation precedes enablement._
 
 ---
 
+### FL-0001: Salesforce Pub/Sub API authentication and client setup is unresolved
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+
+#### Observation
+
+Scaffolding the integration service's Salesforce event subscriber, per
+`docs/decisions/0001-integration-architecture.md` (Platform Event via
+Pub/Sub API).
+
+#### Friction
+
+The Pub/Sub API is gRPC-based, not plain REST, and requires: choosing an
+OAuth authentication flow (JWT bearer vs. username-password vs. web server
+flow), obtaining Salesforce org credentials/certificates, the Pub/Sub API's
+`.proto` definitions, and Avro schema decoding for the event payload. None of
+this is set up yet, and the canonical event contract in `CLAUDE.md` doesn't
+say what a minimal working example looks like.
+
+#### Impact
+
+The subscriber (`services/integration-service/src/salesforce/subscriber.ts`)
+is currently a stub that throws "not implemented." This blocks proving the
+first real event end-to-end, which is Phase 1's actual milestone.
+
+#### Possible Enablement
+
+Not decided yet — observation precedes enablement. Candidates to
+investigate: a documented JWT bearer flow setup guide, a shared Pub/Sub gRPC
+client wrapper, a dev-org creation runbook.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

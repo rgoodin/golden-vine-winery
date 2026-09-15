@@ -41,4 +41,22 @@ See also `docs/devex/observations.md`, `docs/devex/friction-log.md`, and
 
 ---
 
+### DEC-0001: Integration service language/runtime — Node.js + TypeScript
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+
+**Decision:** Build the integration service in Node.js + TypeScript.
+
+**Context:** Scaffolding the first Salesforce → ServiceNow integration
+service required picking a language/runtime; none had been chosen yet.
+
+**Alternatives considered:** Python, Java.
+
+**Reasoning:** Developer preference. Straightforward async event handling
+and a wide range of HTTP/gRPC client libraries for the Salesforce subscriber
+and the ServiceNow adapter to come.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

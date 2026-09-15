@@ -40,4 +40,18 @@ What happened? What was being attempted, and what was noticed?
 
 ---
 
+### OB-0001: Scaffolded integration-service, deferred Pub/Sub implementation
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Category:** environment setup / API discovery
+
+Scaffolded `services/integration-service` (Node.js + TypeScript) with a
+config loader, the canonical `DistributorOnboardingRequested` event type,
+and a stub Salesforce Pub/Sub subscriber. Deliberately stopped short of
+implementing real Salesforce authentication/subscription — see FL-0001 —
+rather than guessing at an approach.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->
