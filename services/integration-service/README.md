@@ -47,7 +47,28 @@ npm run dev
 
 # in another terminal, to test:
 npm run publish-test-event -- "Some Distributor Name"
+npm run verify-recent-incidents -- 5   # or a correlation ID to filter to one event
 ```
+
+## Setup / test scripts
+
+Phase 3 (Enablement) candidate from `docs/devex/lessons-learned.md`
+LL-0004 — scripting repetitive setup/verification via each platform's own
+API beat manual UI clicking. Still local to this service, not a shared
+package (premature until a second integration needs the same thing — see
+`CLAUDE.md`'s Developer #1 principle).
+
+- `scripts/publish-test-event.ts` — publishes a fully-populated test
+  Salesforce event
+- `scripts/verify-recent-incidents.ts` — queries ServiceNow for recent (or
+  correlation-ID-matched) Incidents, closing the loop without opening the
+  ServiceNow UI
+- `scripts/create-platform-event-fields.ts` — (re-)creates the canonical
+  schema's custom fields on the Platform Event; safe to re-run, fails
+  cleanly on fields that already exist
+- `scripts/lib/salesforceTooling.ts` — the reusable Tooling API
+  `CustomField` creation call, extracted so future schema-setup scripts
+  don't re-derive it
 
 ## What's deliberately not here yet
 
@@ -57,8 +78,8 @@ npm run publish-test-event -- "Some Distributor Name"
 - A narrower ServiceNow OAuth Auth Scope (currently relies on the
   dedicated user's `itil` role rather than API-level token scoping — see
   friction-log.md FL-0010)
+- A per-platform non-interactive-auth checklist (the other Phase 3
+  candidate from LL-0003, not yet built)
 
 These are left out per `CLAUDE.md`'s "smallest useful change" principle —
-they'll be added once Phase 1 friction shows what's actually needed. With
-10 friction items logged, a Phase 2 (Observation Review) pass is worth
-doing before adding more code.
+they'll be added once friction shows what's actually needed.

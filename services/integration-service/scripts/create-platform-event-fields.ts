@@ -1,24 +1,16 @@
-import { authenticate } from '../src/salesforce/auth';
 import { config } from '../src/config';
+import { createCustomField, CustomFieldSpec } from './lib/salesforceTooling';
 
 /**
  * Creates the remaining canonical DistributorOnboardingRequested fields on
- * the Distributor_Onboarding_Requested__e Platform Event via the Tooling
- * API's CustomField sobject. One-time setup script, not part of the
- * integration flow itself.
+ * the Distributor_Onboarding_Requested__e Platform Event. One-time setup
+ * script, not part of the integration flow itself.
  *
  * Field design maps the nested canonical event (CLAUDE.md) onto flat
  * fields, since Platform Events can't have nested objects - see
  * docs/decisions/0003-platform-event-schema.md.
  */
-
-interface FieldSpec {
-  fieldName: string;
-  label: string;
-  length: number;
-}
-
-const FIELDS: FieldSpec[] = [
+const FIELDS: CustomFieldSpec[] = [
   { fieldName: 'Event_Id__c', label: 'Event Id', length: 36 },
   { fieldName: 'Event_Version__c', label: 'Event Version', length: 10 },
   { fieldName: 'Correlation_Id__c', label: 'Correlation Id', length: 36 },
@@ -31,30 +23,11 @@ const FIELDS: FieldSpec[] = [
 ];
 
 async function main() {
-  const { accessToken, instanceUrl } = await authenticate();
   const objectApiName = config.salesforce.pubsubTopic.replace(/^\/event\//, '');
 
   for (const field of FIELDS) {
-    const response = await fetch(`${instanceUrl}/services/data/v60.0/tooling/sobjects/CustomField/`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        FullName: `${objectApiName}.${field.fieldName}`,
-        Metadata: {
-          label: field.label,
-          type: 'Text',
-          length: field.length,
-          required: false,
-        },
-      }),
-    });
-
-    const body = await response.json();
-
-    if (!response.ok) {
+    const { success, body } = await createCustomField(objectApiName, field);
+    if (!success) {
       console.error(`FAILED ${field.fieldName}:`, JSON.stringify(body));
     } else {
       console.log(`Created ${field.fieldName}`);

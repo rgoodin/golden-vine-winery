@@ -163,6 +163,16 @@ scripts that exist (`scripts/create-platform-event-fields.ts`,
 `scripts/publish-test-event.ts`) remain Salesforce/this-integration
 specific for now.
 
+**Acted on 2026-09-15:** Extracted the Tooling API `CustomField` call into
+`scripts/lib/salesforceTooling.ts` (reused by
+`create-platform-event-fields.ts`), and added
+`scripts/verify-recent-incidents.ts` to close the ServiceNow-side
+verification loop that previously required opening the browser. Kept
+local to this service rather than a shared package across services/ —
+per `CLAUDE.md`'s Developer #1 principle, there's still only one real
+consumer, so a cross-integration package remains premature until Phase 5
+(the SharePoint integration) actually needs one.
+
 ---
 
 <!-- Add new entries above this line, most recent first. -->

@@ -23,17 +23,20 @@ Definition of Success," achieved. See `docs/devex/observations.md`
 (OB-0001–OB-0006) for how it was proven and `docs/devex/friction-log.md`
 (FL-0001–FL-0010) for everything learned getting there.
 
-**Phase 2 (Observation Review) has been done once already** — see
+**Phase 2 (Observation Review) has been done once** — see
 `docs/devex/lessons-learned.md` for the classification and four lessons
 (LL-0001–LL-0004) synthesized from the Phase 1 friction/observations so
-far. Two are flagged as Phase 3 (Enablement) candidates (a per-platform
-non-interactive-auth checklist, and a small library of setup/test scripts
-built on the existing auth modules) but neither has been built —
-Enablement hasn't started. Re-run this review as more friction
-accumulates, per the Observation → Enablement → Mastery → Observation
-cycle. Not yet built: retry / dead-letter handling, idempotency, tests,
-and any Phase 3 tooling. See `services/integration-service/README.md` for
-current status.
+far. **Phase 3 (Enablement) has started on one of the two candidates:**
+`scripts/lib/salesforceTooling.ts` plus
+`scripts/verify-recent-incidents.ts` (LL-0004). Kept local to this
+service, not a shared cross-service package — there's still only one real
+consumer, so that remains premature until Phase 5 (the SharePoint
+integration) needs it. The other Phase 3 candidate (a per-platform
+non-interactive-auth checklist, LL-0003) is not built. Re-run the
+Observation Review as more friction accumulates, per the Observation →
+Enablement → Mastery → Observation cycle. Not yet built: retry /
+dead-letter handling, idempotency, and tests. See
+`services/integration-service/README.md` for current status.
 
 A Salesforce Developer Edition org (External Client App, JWT Bearer Flow)
 and a ServiceNow Developer Instance (Client Credentials grant, dedicated
