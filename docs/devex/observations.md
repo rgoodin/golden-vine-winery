@@ -76,4 +76,25 @@ doesn't yet mean there's a gRPC/Avro client that uses them (FL-0001).
 
 ---
 
+### OB-0003: Pre-authorized the External Client App for non-interactive JWT auth
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Category:** authentication
+
+The External Client App defaulted to Permitted Users =
+"All users can self-authorize," which implies an interactive consent step —
+not viable for a service with no human present. Changed it to "Admin
+approved users are pre-authorized" and added the System Administrator
+profile under Selected Profiles (Policies tab → OAuth Policies → Edit).
+This was easy to miss: the profile picker only appears inline on the same
+edit form once "Admin approved" is selected, not as a separate "Manage"
+step, which wasn't obvious from the UI.
+
+This closes out the Salesforce-side auth setup blocking FL-0001. What
+remains for FL-0001 is purely code: the actual gRPC/Avro Pub/Sub client
+implementation in `src/salesforce/subscriber.ts`.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->
