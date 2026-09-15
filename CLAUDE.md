@@ -23,11 +23,17 @@ Definition of Success," achieved. See `docs/devex/observations.md`
 (OB-0001–OB-0006) for how it was proven and `docs/devex/friction-log.md`
 (FL-0001–FL-0010) for everything learned getting there.
 
-**Given 10 friction items and 6 observations are now logged, Phase 2
-(Observation Review) is a reasonable next step before adding more code —
-see "Golden Path Evolution" below.** Not yet built beyond this: retry /
-dead-letter handling, idempotency, and tests. See
-`services/integration-service/README.md` for current status.
+**Phase 2 (Observation Review) has been done once already** — see
+`docs/devex/lessons-learned.md` for the classification and four lessons
+(LL-0001–LL-0004) synthesized from the Phase 1 friction/observations so
+far. Two are flagged as Phase 3 (Enablement) candidates (a per-platform
+non-interactive-auth checklist, and a small library of setup/test scripts
+built on the existing auth modules) but neither has been built —
+Enablement hasn't started. Re-run this review as more friction
+accumulates, per the Observation → Enablement → Mastery → Observation
+cycle. Not yet built: retry / dead-letter handling, idempotency, tests,
+and any Phase 3 tooling. See `services/integration-service/README.md` for
+current status.
 
 A Salesforce Developer Edition org (External Client App, JWT Bearer Flow)
 and a ServiceNow Developer Instance (Client Credentials grant, dedicated
