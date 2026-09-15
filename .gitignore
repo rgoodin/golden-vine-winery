@@ -1,0 +1,23 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+
+# NOTE: no language/build tooling has been chosen yet (see CLAUDE.md,
+# "Current Repository State"). Add language- and tool-specific ignores
+# (e.g. node_modules/, target/, .terraform/) once that tooling exists.
