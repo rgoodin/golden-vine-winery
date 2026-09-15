@@ -499,41 +499,83 @@ That gap between "can detect" and "does detect" is itself the next thing
 worth being deliberate about, rather than assuming a manual tool is
 sufficient going forward.
 
+**Resolved 2026-09-15 (Phase 3 improvement, OB-0012):** The
+"finds absence, not multiplicity" limit above is closed. The detector now
+classifies `GAP` (0 Incidents) / `OK` (1) / `DUPLICATE` (>1), with a
+distinct `UNEVALUABLE` category for events predating
+`Correlation_Id__c`. Validated against the complete 11-event history with
+zero discrepancies from the independently-predicted result - see OB-0012
+for the full comparison table. The remaining limit - detection is
+on-demand, not automatic - is unchanged and still open.
+
+---
+
+### LL-0011: A validated audit tool is not the same as a monitored system — "can detect" still requires a human to run it
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Evidence:** OB-0012
+
+**Lesson:** With counting added, `detect-unprocessed-events.ts` now
+correctly classifies every known failure mode this project has
+deliberately produced (silent loss, duplicate, and even a historical gap
+from before the ServiceNow adapter existed) in a single pass, validated
+against independently-recorded history with zero discrepancies. That's a
+meaningfully complete *diagnostic*. It is still not a *safeguard*:
+nothing triggers it, so a real silent loss or duplicate in an unattended
+run would sit undetected exactly as long as no one thinks to run the
+tool - the same gap LL-0010 already named, now more clearly the last
+piece standing between "we can find this" and "this gets found."
+
+A second, smaller-but-real limit surfaced during validation, not before:
+the tool currently re-sweeps from `EARLIEST` (or a manually-supplied
+anchor) on every run - fine at 11 events, but with no persisted "last
+audited position" of its own, every run re-checks the entire retained
+history from scratch. That's a cost that grows with retention and event
+volume, neither of which is known (FL-0013).
+
+**Implication:** Not choosing to automate the tool yet, and not choosing
+an architecture for the underlying duplicate/silent-loss problem, as
+instructed throughout this investigation. What's left before either of
+those decisions makes sense: making the audit tool itself efficient to
+re-run (its own incremental position, separate from the runtime
+checkpoint) is a smaller, more clearly "still just an instrument" step
+than deciding whether/how to run it automatically.
+
 ---
 
 ## Recommended smallest Phase 3 Enablement experiment (not started)
 
-The prior recommendation (investigate whether silent-loss detection is
-possible) has been **completed** — see OB-0011, FL-0017, LL-0010: yes,
-confirmed two ways. This section recommends the next step based on that
-result, without selecting an architecture.
+The prior recommendation (extend the detector to catch duplicates, not
+just silent loss) has been **completed** — see OB-0012: validated with
+zero discrepancies against known history. This section recommends the
+next step based on the combined evidence, without selecting an
+architecture for the underlying problem and without automating the tool.
 
-Two real gaps remain in what was just built, and the smaller one is the
-better next step:
+**Recommended: give the audit tool its own persisted "last audited
+position," entirely separate from the runtime subscriber's
+`checkpoint.ts`, so repeat runs can sweep incrementally instead of
+re-replaying the full retained history every time.** Concretely
+(described, not implemented): a second, clearly-named state file (e.g.
+`.audit-checkpoint.json`) written only by `detect-unprocessed-events.ts`
+after a successful run, read back in on the next run as the default
+`from` position instead of `EARLIEST`. This stays strictly inside the
+audit tool's own scope - it does not touch `checkpoint.ts`,
+`subscriber.ts`, `pubsubClient.ts`'s `subscribe()`, or any runtime
+processing/replay/idempotency/retry behavior, matching this round's
+constraint even though it isn't bound by it going forward. It's smaller
+than either remaining larger step (automating the sweep, or choosing a
+fix architecture) and is a direct, mechanical response to the one new
+limit this round's validation actually surfaced - not a guess about what
+might matter next.
 
-**Recommended: extend the existing detector to also catch duplicates
-(count > 1), not just silent loss (count = 0), turning it into one
-reconciliation tool that covers both directly-confirmed failure modes
-(LL-0005/LL-0008's duplicates and LL-0008/LL-0009's silent loss) with the
-same mechanism.** Concretely (described, not implemented): change
-`detect-unprocessed-events.ts`'s ServiceNow query from "does at least one
-Incident exist" to "how many Incidents exist," and report three states
-per correlation ID instead of two (`OK` / `GAP` / `DUPLICATE (n)`). This
-is a small, mechanical change to code that already exists and already
-works, and it directly closes the "finds absence, not multiplicity"
-limitation LL-0010 just found - rather than guessing whether it matters,
-now there's already a mechanism to point at both known problems and see
-their true combined extent in one pass.
-
-**Noted but not recommended yet, as a larger step:** turning the sweep
-from an on-demand script into something that runs automatically (on a
-schedule, or triggered by process restart) would close the "not
-automatic" gap LL-0010 named - but that's a step toward building a real
-mechanism/architecture, which per this investigation's own instructions
-(and the project's Developer #1 principle) shouldn't be chosen yet
-without first knowing the combined true extent of both failure modes.
-`ManagedSubscribe`'s `CommitReplayRequest`/`Response` flow also remains
-noted, larger, and deferred.
+**Noted but not recommended yet, as larger steps:** running the sweep
+automatically (on a schedule, or triggered by restart) remains the step
+that would close the "not automatic" gap LL-0010/LL-0011 both named, but
+building any run-trigger is a step toward a real mechanism, appropriately
+deferred until the underlying fix architecture is chosen. `ManagedSubscribe`'s
+`CommitReplayRequest`/`Response` flow also remains noted, larger, and
+deferred.
 
 ---
 

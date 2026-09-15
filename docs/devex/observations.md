@@ -566,4 +566,76 @@ known failure modes would need to count, not just check presence.
 
 ---
 
+### OB-0012: Detector extended to count Incidents — validated against complete known history with zero discrepancies
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Category:** observability / testing
+
+Closed OB-0011's stated limitation: `scripts/detect-unprocessed-events.ts`
+now counts matching ServiceNow Incidents per correlation ID instead of
+only checking existence, classifying each replayable event as `GAP` (0),
+`OK` (1), or `DUPLICATE` (>1), with a separate `UNEVALUABLE` category for
+events predating `Correlation_Id__c`'s existence - explicitly not
+counted as `GAP`, since absence of a side effect can't be established for
+something that predates the field used to look it up. Duplicate evidence
+(Incident numbers, count) is reported, never altered. Scope stayed
+strictly to the audit script: `replayRange()`, `checkpoint.ts`,
+`subscriber.ts`, `incidentAdapter.ts`, and all runtime processing/replay/
+checkpoint/retry/idempotency behavior are unchanged - confirmed via
+`git status` showing only the script file modified.
+
+**Ran across the complete available history** (`npm run
+detect-unprocessed-events`, `EARLIEST` sweep, all 11 events) and compared
+against this project's own known experimental record, point by point:
+
+| Event | Predicted | Actual | Match |
+|---|---|---|---|
+| "Acme Distribution Co" (no `Correlation_Id__c`) | UNEVALUABLE | UNEVALUABLE | ✓ |
+| "Golden Gate Distributors" (predates ServiceNow adapter) | GAP | GAP | ✓ |
+| "Sonoma Valley Distributors" (INC0010001) | OK | OK, `incidents=[INC0010001] count=1` | ✓ |
+| "Duplicate Test Co" event #1 (FL-0011) | DUPLICATE | DUPLICATE, `incidents=[INC0010002, INC0010003] count=2` | ✓ |
+| "Duplicate Test Co" event #2 (FL-0011) | DUPLICATE | DUPLICATE, same evidence as #1 | ✓ |
+| "Outage Test Co" (FL-0012) | GAP | GAP | ✓ |
+| Event A (OB-0008) | OK | OK, `incidents=[INC0010004] count=1` | ✓ |
+| Event B (OB-0008) | OK | OK, `incidents=[INC0010005] count=1` | ✓ |
+| Event C (OB-0009 baseline) | OK | OK, `incidents=[INC0010006] count=1` | ✓ |
+| Event D (FL-0015) | DUPLICATE | DUPLICATE, `incidents=[INC0010008, INC0010007] count=2` | ✓ |
+| Event E (FL-0016) | GAP | GAP | ✓ |
+
+Summary line: `UNEVALUABLE=1 GAP=3 OK=4 DUPLICATE=3` - matches the
+predicted tally exactly. **Zero discrepancies found.** Per instructions,
+no classification logic was adjusted to chase this result - the
+prediction was made from this project's own prior, independently-recorded
+history before running the tool, and the tool's output was taken as-is.
+
+Specifically confirms all four things this validation set out to check:
+- Known missing-side-effect events ("Golden Gate Distributors", "Outage
+  Test Co", Event E) all classified `GAP`.
+- Normal successfully-processed events (Sonoma Valley, A, B, C) all
+  classified `OK`.
+- Both intentionally-produced duplicate cases ("Duplicate Test Co" x2,
+  Event D) all classified `DUPLICATE`, with Incident numbers and count as
+  independently-checkable evidence.
+- The one event lacking `Correlation_Id__c` classified `UNEVALUABLE`, not
+  `GAP`.
+
+**A developer-experience note, not a bug:** because "Duplicate Test Co"
+was published twice with the *same* `correlationId`, both Salesforce
+events appear as separate report lines with **identical** evidence (same
+two Incident numbers, same count) - each line is independently correct
+(that correlation ID really does have two Incidents), but a reader
+scanning output quickly could mistake the repeated evidence for a
+reporting bug rather than two Salesforce-side events sharing one
+correlation ID. Worth knowing when reading this tool's output, not worth
+fixing - collapsing by correlation ID would lose the "how many Salesforce
+events map to this ID" signal, which is a different, also-useful question
+than "how many Incidents."
+
+This remains an experimental/audit instrument, not promoted into any
+runtime path or the Golden Path - it is not run automatically, and
+nothing currently triggers it.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

@@ -13,7 +13,7 @@ a real Pub/Sub API gRPC subscription, mapped onto the canonical nested
 `DistributorOnboardingRequestedEvent` shape (`src/types/events.ts`), and
 used to create a real ServiceNow Incident
 (`docs/decisions/0004-servicenow-authentication.md`). See
-`docs/devex/observations.md` (OB-0001–OB-0011) and
+`docs/devex/observations.md` (OB-0001–OB-0012) and
 `docs/devex/friction-log.md` (FL-0001–FL-0017).
 
 Several known gaps were deliberately tested rather than assumed:
@@ -30,14 +30,14 @@ Several known gaps were deliberately tested rather than assumed:
   two (FL-0015, OB-0009); checkpointing *before* calling ServiceNow
   instead causes a **silent loss** — no Incident ever created (FL-0016,
   OB-0010).
-- **Whether a silent loss can be detected after the fact — investigated
-  and confirmed (LL-0010)**: `replayRange()` in `pubsubClient.ts`, via
-  either a known-old checkpoint or a full `ReplayPreset.EARLIEST` sweep,
-  correctly reconstructed and classified this project's entire 11-event
-  test history against ServiceNow with no false positives/negatives (see
-  `npm run detect-unprocessed-events`, FL-0017, OB-0011). Two real limits
-  found: detection needs an anchor `checkpoint.ts` doesn't retain, and
-  this method finds absence but not duplication.
+- **A working audit tool now detects both failure modes** (LL-0010,
+  LL-0011): `scripts/detect-unprocessed-events.ts` replays Salesforce
+  events (via a known position or a full `ReplayPreset.EARLIEST` sweep)
+  and classifies each as `GAP` / `OK` / `DUPLICATE` / `UNEVALUABLE`
+  against ServiceNow. Validated against this project's complete 11-event
+  history with **zero discrepancies** from the independently-predicted
+  result (OB-0012). Still an on-demand experimental/audit instrument, not
+  wired into any runtime path.
 
 None of this is a production reliability feature — the checkpoint
 mechanism and the detector are both working experiments, and no
@@ -103,9 +103,13 @@ package (premature until a second integration needs the same thing — see
 - `scripts/detect-unprocessed-events.ts` — read-only reconciliation:
   replays Salesforce events (`npm run detect-unprocessed-events` sweeps
   from `EARLIEST`; pass a specific replay ID to check from a known
-  position instead) and cross-references each `correlationId` against
-  ServiceNow, reporting `OK` or `GAP DETECTED`. Finds silent loss, not
-  duplicates (see FL-0017, LL-0010).
+  position instead) and counts matching ServiceNow Incidents per
+  `correlationId`, classifying each as `GAP` (0), `OK` (1), `DUPLICATE`
+  (>1, with Incident numbers as evidence), or `UNEVALUABLE` (no
+  `Correlation_Id__c` - predates that field, not treated as a gap).
+  Validated against the complete known event history with zero
+  discrepancies (see FL-0017, OB-0011, OB-0012, LL-0010, LL-0011).
+  Experimental/audit only - not run automatically.
 - `EXPERIMENT_CRASH_BEFORE_CHECKPOINT=true npm run dev` — deterministic
   test-only crash point in `pubsubClient.ts`: exits right after an event
   is successfully processed but before its checkpoint is persisted, for
@@ -130,16 +134,16 @@ and
 ## What's deliberately not here yet
 
 - A general retry / dead-letter / idempotency solution — root causes are
-  understood and **confirmed by direct experiment on both possible
-  checkpoint orderings, plus confirmed-detectable via a working
-  diagnostic tool** (FL-0011, FL-0012, FL-0014–FL-0017,
-  `docs/devex/lessons-learned.md` LL-0005, LL-0006, LL-0008–LL-0010), but
+  understood, confirmed by direct experiment on both possible checkpoint
+  orderings, and **both failure modes are now reliably detectable via a
+  validated diagnostic tool** (FL-0011, FL-0012, FL-0014–FL-0017,
+  `docs/devex/lessons-learned.md` LL-0005, LL-0006, LL-0008–LL-0011), but
   no fix has been designed or built, and no architecture has been chosen.
-  The recommended next step is extending the detector to also count
-  duplicates (not just find absences), unifying detection of both known
-  failure modes — see LL-0010's "Recommended smallest Phase 3 Enablement
-  experiment." Not the same as building the fix itself, or making
-  detection automatic rather than on-demand.
+  The recommended next step is giving the audit tool its own incremental
+  "last audited position" (separate from the runtime checkpoint) so
+  repeat runs don't always re-sweep from `EARLIEST` — see LL-0011's
+  "Recommended smallest Phase 3 Enablement experiment." Not the same as
+  building the fix itself, or making detection automatic.
 - Tests
 - A narrower ServiceNow OAuth Auth Scope (currently relies on the
   dedicated user's `itil` role rather than API-level token scoping — see

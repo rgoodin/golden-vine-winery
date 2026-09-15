@@ -23,52 +23,41 @@ Definition of Success," achieved. See `docs/devex/observations.md`
 (OB-0001–OB-0006) for how it was proven and `docs/devex/friction-log.md`
 (FL-0001–FL-0010) for everything learned getting there.
 
-**Phase 2 (Observation Review) has been done twice** — see
-`docs/devex/lessons-learned.md` for the full history (LL-0001–LL-0009).
-Summary of how we got here: the first review's two Phase 3 candidates
-were both built (LL-0004: `scripts/lib/salesforceTooling.ts` +
-`scripts/verify-recent-incidents.ts`, kept local to this service, not a
-shared package — only one real consumer exists so far; LL-0003:
-`docs/runbooks/salesforce-non-interactive-auth-setup.md` and
-`docs/runbooks/servicenow-non-interactive-auth-setup.md`). Then, rather
-than build retry/idempotency speculatively, that friction was
-deliberately experienced: duplicate delivery and a process-crashing
-ServiceNow failure were both confirmed real (FL-0011, FL-0012, OB-0007),
-analyzed in a second review (LL-0005–LL-0007), and a minimal replay
-checkpoint was built and proven to recover offline events
-(`src/salesforce/checkpoint.ts`, OB-0008) — while also correcting an
-earlier wrong claim about Salesforce exposing retention info via
-`GetTopic` (it doesn't - FL-0013).
+**Phase 2 (Observation Review) has been done twice, feeding a chain of
+Phase 3 experiments** — full history in `docs/devex/lessons-learned.md`
+(LL-0001–LL-0011). Condensed summary:
 
-**Two further deterministic experiments have since directly confirmed
-both checkpoint orderings' failure modes (LL-0009):**
+- Both Phase 3 candidates from the first review were built: a local
+  setup/test script library (LL-0004) and non-interactive-auth runbooks
+  for both platforms (LL-0003, `docs/runbooks/`).
+- Rather than build retry/idempotency speculatively, that friction was
+  deliberately experienced and confirmed real: duplicate delivery
+  (FL-0011), a process-crashing ServiceNow failure (FL-0012), and —
+  after building a minimal replay checkpoint
+  (`src/salesforce/checkpoint.ts`) that successfully recovers offline
+  events (OB-0008) — **both possible checkpoint orderings' failure modes
+  were directly confirmed and compared (LL-0009):** checkpoint-after-
+  ServiceNow (current default) causes a **duplicate** Incident on a
+  crash (FL-0015); checkpoint-before-ServiceNow causes a **silent
+  loss** — no Incident, no log trail (FL-0016). Neither is simply safer.
+- **Whether a silent loss is detectable after the fact was investigated
+  and confirmed** (`replayRange()` in `pubsubClient.ts`, either from a
+  known position or a full `ReplayPreset.EARLIEST` sweep — confirmed to
+  return this project's entire test history — LL-0010).
+- **The detector was then extended to count Incidents, not just check
+  existence** (`GAP`/`OK`/`DUPLICATE`/`UNEVALUABLE`,
+  `npm run detect-unprocessed-events`), and validated against the
+  complete 11-event history with **zero discrepancies** from the
+  independently-predicted result (OB-0012, LL-0011).
 
-| Ordering | Confirmed result |
-|---|---|
-| Checkpoint **after** ServiceNow (current default) | Crash → event **redelivered** → **duplicate** Incident (FL-0015, OB-0009) |
-| Checkpoint **before** ServiceNow (tested via a reversible experimental flag) | Crash → event **not redelivered** → **silent loss**, no Incident ever created (FL-0016, OB-0010) |
-
-Neither is simply "safer" — each fully prevents the other's failure mode
-while fully exhibiting its own, and the silent-loss mode is markedly
-harder to detect (no business-identifiable log trail at all).
-
-**Whether a silent loss can be detected after the fact has since been
-investigated too (LL-0010, OB-0011, FL-0017) — yes, confirmed two
-ways.** `replayRange()` in `pubsubClient.ts` can replay from either a
-known-old position or `ReplayPreset.EARLIEST` (a full sweep, confirmed to
-return this project's entire 11-event test history). Cross-referencing
-against ServiceNow (`npm run detect-unprocessed-events`) correctly
-classified every event with zero false positives/negatives. Two real
-limits found: (1) targeted replay needs an anchor `checkpoint.ts` doesn't
-retain (single overwritten value, no history), and (2) this detection
-method finds absence (silent loss) but not multiplicity (duplicates) -
-it reported known duplicate events as `OK` since at least one Incident
-existed. No architecture has been chosen. The recommended next step —
-extend the detector to also count duplicates, unifying detection of both
-confirmed failure modes in one tool — is proposed, not built. See
-`docs/devex/lessons-learned.md` LL-0008–LL-0010 for the full history. Not
-yet built: any general retry / dead-letter / idempotency solution, an
-automatic (rather than on-demand) detection trigger, and tests. See
+No architecture has been chosen for the underlying duplicate/silent-loss
+problem, and the detector remains an on-demand experimental/audit
+instrument, not promoted into any runtime path. The recommended next
+step — give the audit tool its own incremental "last audited position,"
+separate from the runtime checkpoint, so repeat runs don't always
+re-sweep from `EARLIEST` — is proposed, not built. Not yet built: any
+general retry/dead-letter/idempotency solution, an automatic (rather
+than on-demand) detection trigger, and tests. See
 `services/integration-service/README.md` for current status.
 
 A Salesforce Developer Edition org (External Client App, JWT Bearer Flow)
