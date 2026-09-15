@@ -9,17 +9,19 @@ below). One service exists so far:
 
     services/integration-service/   Node.js + TypeScript
 
-It is scaffolding only — it does not work end-to-end yet. It stubs a
-Salesforce Pub/Sub API subscriber for the `DistributorOnboardingRequested`
-event (see `docs/decisions/0001-integration-architecture.md` and
-`0002-authentication-strategy.md`) and logs received events; it does not yet
-implement the actual gRPC/Avro Pub/Sub client, call ServiceNow, or handle
+It authenticates to Salesforce (JWT Bearer Flow, see
+`docs/decisions/0002-authentication-strategy.md`) and opens a real Pub/Sub
+API gRPC subscription (see `docs/decisions/0001-integration-architecture.md`
+and `src/salesforce/pubsubClient.ts`) — both confirmed working against the
+real dev org. It does not yet: have anything to actually subscribe to (the
+`DistributorOnboardingRequested__e` Platform Event doesn't exist in
+Salesforce — FL-0004), map decoded Platform Event fields onto the canonical
+nested event shape in `src/types/events.ts`, call ServiceNow, or handle
 retries/idempotency. See `services/integration-service/README.md` and
-`docs/devex/friction-log.md` (FL-0001–FL-0003) for the current state and
-what's blocking further progress.
+`docs/devex/friction-log.md` (FL-0001–FL-0005) for the current state.
 
 A Salesforce Developer Edition org and an External Client App (JWT Bearer
-Flow) have been set up for testing; credentials live in
+Flow, pre-authorized) have been set up for testing; credentials live in
 `services/integration-service/.env` (gitignored, not in this repo).
 
 Commands (from `services/integration-service/`):

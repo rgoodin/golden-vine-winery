@@ -6,6 +6,11 @@ export const config = {
     clientId: process.env.SALESFORCE_CLIENT_ID ?? '',
     username: process.env.SALESFORCE_USERNAME ?? '',
     jwtPrivateKeyPath: process.env.SALESFORCE_JWT_PRIVATE_KEY_PATH ?? './certs/server.key',
+    // Per Salesforce's JWT Bearer Flow spec, the JWT `aud` claim is the
+    // fixed login host for the org's environment type (production/Developer
+    // Edition vs. sandbox) - NOT the org's My Domain URL, which is instead
+    // used as the token endpoint below.
+    jwtAudience: process.env.SALESFORCE_JWT_AUDIENCE ?? 'https://login.salesforce.com',
     pubsubHost: process.env.SALESFORCE_PUBSUB_HOST ?? 'api.pubsub.salesforce.com:7443',
     pubsubTopic: process.env.SALESFORCE_PUBSUB_TOPIC ?? '/event/DistributorOnboardingRequested__e',
   },

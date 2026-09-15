@@ -1,21 +1,18 @@
-import type { DistributorOnboardingRequestedEvent } from '../types/events';
+import { config } from '../config';
+import { subscribe, DecodedPubSubEvent } from './pubsubClient';
 
 /**
- * Subscribes to the DistributorOnboardingRequested Platform Event via
- * Salesforce's Pub/Sub API and invokes `onEvent` for each event received.
+ * Subscribes to the configured Platform Event topic via the Pub/Sub API and
+ * invokes `onEvent` for each event received.
  *
- * NOT YET IMPLEMENTED. The Pub/Sub API is gRPC-based and requires, at
- * minimum: an OAuth authentication flow (not yet chosen), the Pub/Sub API's
- * .proto definitions and a gRPC client, and Avro schema retrieval/decoding
- * for the event payload.
- *
- * See docs/devex/friction-log.md FL-0001 for the open questions blocking
- * this implementation.
+ * NOTE: passes through the raw decoded Avro payload rather than the typed
+ * DistributorOnboardingRequestedEvent from src/types/events.ts. Platform
+ * Events are flat, so once the actual DistributorOnboardingRequested__e
+ * object exists in Salesforce, its real field names need to be mapped onto
+ * the canonical event shape here - see docs/devex/friction-log.md.
  */
 export async function subscribeToDistributorOnboardingEvents(
-  onEvent: (event: DistributorOnboardingRequestedEvent) => Promise<void>
+  onEvent: (event: DecodedPubSubEvent) => void | Promise<void>
 ): Promise<void> {
-  throw new Error(
-    'subscribeToDistributorOnboardingEvents() is not yet implemented - see docs/devex/friction-log.md FL-0001'
-  );
+  await subscribe(config.salesforce.pubsubTopic, onEvent);
 }

@@ -85,6 +85,16 @@ Not decided yet — observation precedes enablement. Candidates to
 investigate: a documented JWT bearer flow setup guide, a shared Pub/Sub gRPC
 client wrapper, a dev-org creation runbook.
 
+**Resolved 2026-09-15:** Implemented `src/salesforce/auth.ts` (JWT bearer
+flow) and `src/salesforce/pubsubClient.ts` (gRPC client using Salesforce's
+officially published `pubsub_api.proto`, fetched directly rather than
+reconstructed from memory — see `src/salesforce/proto/`). Ran it against the
+real dev org: authentication and the gRPC/TLS connection both worked on the
+first attempt (confirmed by getting a topic-not-found error identifying our
+actual org ID, rather than an auth error). The only remaining blocker is
+that the `DistributorOnboardingRequested__e` Platform Event doesn't exist in
+Salesforce yet — tracked as FL-0004.
+
 ---
 
 ### FL-0002: "Connected App" UI has been replaced by "External Client Apps"
@@ -154,6 +164,70 @@ script/automate credential retrieval end-to-end.
 
 None needed — this is expected security behavior, not a gap to fix. Worth
 documenting so future developers aren't surprised by it.
+
+---
+
+### FL-0004: DistributorOnboardingRequested__e Platform Event doesn't exist yet
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+
+#### Observation
+
+Ran the newly-implemented Pub/Sub subscriber (`npm run dev`) against the
+real dev org to test it end-to-end.
+
+#### Friction
+
+Not really friction — this is the expected next gap. Auth and the gRPC
+connection both worked; the Subscribe call failed because
+`/event/DistributorOnboardingRequested__e` doesn't exist in Salesforce yet.
+We only ever set up authentication, never created the Platform Event
+object/fields.
+
+#### Impact
+
+Can't prove an event end-to-end (Phase 1's actual milestone) until the
+Platform Event exists and something publishes a test event.
+
+#### Possible Enablement
+
+Not decided yet. Next step is simply to create the Platform Event object
+and its fields in Setup, then publish a test event (via Setup's UI or the
+REST API) and confirm the subscriber logs it.
+
+---
+
+### FL-0005: JWT `aud` claim must be the fixed login host, not the org's My Domain URL
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+
+#### Observation
+
+Implementing the JWT bearer flow assertion in `src/salesforce/auth.ts`.
+
+#### Friction
+
+It's tempting to set the JWT `aud` claim to the org's own My Domain URL
+(`SALESFORCE_LOGIN_URL`, used as the token endpoint) since that's the
+"Salesforce URL" already in config. Per Salesforce's JWT Bearer Flow spec,
+`aud` must instead be a fixed value per environment type —
+`https://login.salesforce.com` for production/Developer Edition,
+`https://test.salesforce.com` for sandboxes — regardless of the org's
+custom domain. Using the My Domain URL as `aud` would likely produce an
+"audience mismatch" error.
+
+#### Impact
+
+Would have cost a confusing auth failure and debugging round-trip if not
+caught before the first real test run.
+
+#### Possible Enablement
+
+Addressed directly: added a separate `SALESFORCE_JWT_AUDIENCE` config value
+(defaulting to `https://login.salesforce.com`) distinct from
+`SALESFORCE_LOGIN_URL`, with a comment explaining the distinction.
 
 ---
 
