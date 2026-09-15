@@ -12,6 +12,9 @@ export const config = {
     // used as the token endpoint below.
     jwtAudience: process.env.SALESFORCE_JWT_AUDIENCE ?? 'https://login.salesforce.com',
     pubsubHost: process.env.SALESFORCE_PUBSUB_HOST ?? 'api.pubsub.salesforce.com:7443',
-    pubsubTopic: process.env.SALESFORCE_PUBSUB_TOPIC ?? '/event/DistributorOnboardingRequested__e',
+    // Salesforce auto-generates the API name from the Platform Event's
+    // Label with underscores between words (see docs/devex/friction-log.md
+    // FL-0006) - it is NOT automatically PascalCase.
+    pubsubTopic: process.env.SALESFORCE_PUBSUB_TOPIC ?? '/event/Distributor_Onboarding_Requested__e',
   },
 };

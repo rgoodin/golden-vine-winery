@@ -196,6 +196,11 @@ Not decided yet. Next step is simply to create the Platform Event object
 and its fields in Setup, then publish a test event (via Setup's UI or the
 REST API) and confirm the subscriber logs it.
 
+**Resolved 2026-09-15:** Created the Platform Event and one field
+(`Distributor_Name__c`) in Setup, then published a test event via a small
+REST-API script (`scripts/publish-test-event.ts`) and confirmed the
+subscriber logged it in real time. Full event flow proven end-to-end.
+
 ---
 
 ### FL-0005: JWT `aud` claim must be the fixed login host, not the org's My Domain URL
@@ -228,6 +233,42 @@ caught before the first real test run.
 Addressed directly: added a separate `SALESFORCE_JWT_AUDIENCE` config value
 (defaulting to `https://login.salesforce.com`) distinct from
 `SALESFORCE_LOGIN_URL`, with a comment explaining the distinction.
+
+---
+
+### FL-0006: Platform Event API name doesn't default to PascalCase
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+
+#### Observation
+
+After creating the `Distributor Onboarding Requested` Platform Event and
+leaving API Name on its auto-filled value, the subscriber still got
+"topic ... not found" even after waiting.
+
+#### Friction
+
+Salesforce auto-generates the API Name from the Label by replacing spaces
+with underscores, producing `Distributor_Onboarding_Requested__e` - not
+`DistributorOnboardingRequested__e` as assumed (matching the PascalCase
+`eventType` field name used in the conceptual payload in `CLAUDE.md`). The
+mismatch looked exactly like a propagation-delay issue at first (same
+"topic not found" error), which cost a wasted retry before checking the
+actual API Name on the object's detail page.
+
+#### Impact
+
+One extra round-trip (re-running the subscriber, then asking the developer
+to confirm the exact API Name) before finding the real cause.
+
+#### Possible Enablement
+
+Addressed directly: `SALESFORCE_PUBSUB_TOPIC` in `.env`/`.env.example` and
+the default in `config.ts` were updated to match Salesforce's actual name,
+with a comment warning not to assume PascalCase. General lesson: always
+confirm exact API names from the org rather than deriving them from a
+Label or a conceptual/example payload.
 
 ---
 

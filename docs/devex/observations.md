@@ -97,4 +97,34 @@ implementation in `src/salesforce/subscriber.ts`.
 
 ---
 
+### OB-0004: First end-to-end event proven — Phase 1's actual milestone
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Category:** testing / milestone
+
+Implemented the real Pub/Sub client (`src/salesforce/auth.ts`,
+`pubsubClient.ts`, using Salesforce's official `pubsub_api.proto` -
+`docs/decisions/0002-authentication-strategy.md`), created the
+`Distributor_Onboarding_Requested__e` Platform Event with one field, wrote
+a small test-event publisher (`scripts/publish-test-event.ts`), and ran the
+whole thing against the real dev org:
+
+    npm run dev                                  # subscriber connects, waits
+    npm run publish-test-event -- "Acme Distribution Co"   # publishes via REST
+
+The subscriber logged the received event in real time, with the real
+`Distributor_Name__c` value, `CreatedDate`, `CreatedById`, and `replayId`.
+
+Two small mismatches were caught and fixed along the way: the JWT `aud`
+claim (FL-0005) and the Platform Event's actual (underscored) API name
+vs. the assumed PascalCase name (FL-0006).
+
+This is `CLAUDE.md`'s stated first milestone for the "Developer #1"
+experiment (minus the ServiceNow leg, which doesn't exist yet): a
+realistic Salesforce event reaching the integration layer, with the
+experience documented along the way.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->
