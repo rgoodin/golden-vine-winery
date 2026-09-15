@@ -548,7 +548,7 @@ than deciding whether/how to run it automatically.
 
 **Date:** 2026-09-15
 **Phase:** Phase 1 — Developer Experience
-**Evidence:** FL-0018, OB-0014, OB-0015
+**Evidence:** FL-0018, OB-0014, OB-0015, OB-0016
 
 **Lesson:** This round set out to answer one narrow, important question:
 can ServiceNow itself guarantee that two requests for the same business
@@ -625,6 +625,21 @@ strength of one inconclusive instance-specific UI obstacle rather than a
 confirmed platform limitation. That's not yet enough. See the
 architecture spike document for the specific next experiment this
 recommends instead of an ADR.
+
+**Addendum 2026-09-15 (same day, direct follow-up — FL-0018, OB-0016):**
+went back and resolved the two most obvious candidate explanations for
+the unresolved obstacle above: `security_admin` was assigned but not
+*elevated* for the session (fixed, confirmed via the platform's own UI
+state), and the target column genuinely did contain duplicate values
+left over from this very experiment's own OB-0014 run (fixed, verified
+independently). Both were real; fixing them changed observable behavior
+(a silent `200` became a specific, correct validation error). With both
+fixed, the index still does not persist, checked four independent ways.
+This doesn't reverse the lesson above — it sharpens it. The gap was
+never "we haven't tried hard enough"; two genuine, plausible-sounding
+explanations were tested to exhaustion and ruled out, and the platform
+still won't confirm the guarantee exists. That is stronger negative
+evidence than the original entry had, not a repeat of it.
 
 ---
 

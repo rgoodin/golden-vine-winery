@@ -751,4 +751,55 @@ yet.
 
 ---
 
+### OB-0016: Elevating security_admin and removing duplicate data resolved two real causes — but the unique index still does not persist
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Category:** experiment / reliability / platform
+
+Direct continuation of FL-0018, specifically to answer one question:
+*can ServiceNow provide an enforceable target-side uniqueness invariant
+that prevents two concurrent creates for the same business-operation
+ID?* Full account in FL-0018's "Follow-up 2026-09-15" section; this
+entry records the outcome for the observation log.
+
+**Two real, confirmed causes were found and fixed, in order:**
+
+1. `security_admin` was assigned to the admin account but not elevated
+   for the session — confirmed via the platform's own UI (the avatar
+   menu's `aria-label` changed from `"System Administrator: Available"`
+   to `"System Administrator: security_admin, Available"` after using
+   the built-in "Elevate role" action). Elevating changed real
+   server-side behavior: the same wizard submission went from a silent
+   `200` with no feedback to a specific, correct validation error.
+2. That error was correct: OB-0014's own concurrency experiment had left
+   a genuine duplicate value in `u_gv_business_operation_id`
+   (`INC0010009` and `INC0010010` both carried the same value). Cleared
+   it on one record (field only, record not deleted) and verified
+   independently that the duplicate was gone.
+
+**With both fixed, the index-creation flow still does not result in a
+verifiable, persisted unique constraint.** Checked four independent
+sources after a real submission with no error path taken: `sys_index`
+(filtered query, still zero rows), `staged_alter_history` (ServiceNow's
+own schema-alteration tracking table — empty for every table in this
+instance, not just this one), `sys_email` (no completion notification,
+despite the UI's own message text describing one), and `sys_dictionary`
+(still no native uniqueness field on the target column). All four agree.
+
+**This is a stronger, more specific negative result than FL-0018's
+original entry, not a repeat of it.** The two most plausible blockers
+(privilege, dirty data) were directly tested and eliminated as the
+explanation, which narrows what's actually going on without resolving
+it. Per this round's explicit instruction, the concurrency experiment
+was **not** rerun under an "enforced" premise, since no enforcement
+could be independently verified as active — rerunning it would have
+either reproduced OB-0014's exact result (uninformative) or, worse,
+risked being misread as testing a real constraint that doesn't exist. No
+workaround (application-level locking, lookup-before-create, or any
+other idempotency mechanism) was implemented as a substitute, per
+instruction.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

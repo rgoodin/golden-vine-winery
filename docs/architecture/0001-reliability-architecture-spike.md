@@ -1,10 +1,12 @@
 # Architecture Spike: Guaranteeing Exactly-One Incident per Business Event
 
 **Status:** SPIKE — investigation only. No decision made, no ADR written.
-**Date:** 2026-09-15 (updated same day with a focused ServiceNow
-target-side idempotency follow-up — see §3a and §3b)
+**Date:** 2026-09-15 (updated twice same day: a focused ServiceNow
+target-side idempotency follow-up — §3a/§3b — and then a direct
+continuation resolving two real causes behind §3a's open question,
+without resolving the question itself — see §3a's "Follow-up" note)
 **Related:** `docs/devex/friction-log.md` FL-0011–FL-0018,
-`docs/devex/observations.md` OB-0007–OB-0015,
+`docs/devex/observations.md` OB-0007–OB-0016,
 `docs/devex/lessons-learned.md` LL-0005–LL-0012,
 `docs/decisions/0001`–`0004`
 
@@ -176,6 +178,47 @@ Conducted via a human-authenticated ServiceNow admin browser session -
   admin can reliably add one to the Incident table through the standard
   UI here" - and that gap is itself relevant operational evidence, not
   just a research inconvenience (see LL-0012).
+
+**Follow-up, same day (FL-0018, OB-0016): two real causes found and
+fixed; the gap above remains.** Went back specifically to resolve this
+section's open question. Found and fixed two genuine causes, in order:
+
+1. **`security_admin` was assigned to the admin account but not
+   *elevated* for the session** - a real ServiceNow distinction this
+   spike hadn't previously accounted for. `g_user.hasRole('security_admin')`
+   returning `true` was misleading; elevated-privilege roles must be
+   separately activated per-session via the platform's own "Elevate
+   role" UI action. Elevating it (confirmed via the account's own
+   avatar `aria-label` changing to include `security_admin`) changed
+   real behavior: the identical wizard submission went from a silent
+   `200` with no feedback to a specific, correct validation error -
+   *"Requested fields (u_gv_business_operation_id) contain duplicate
+   values."*
+2. **That error was correct.** §3b's own concurrency experiment had left
+   a genuine duplicate value in place (`INC0010009`/`INC0010010`).
+   Cleared it on one record and verified independently.
+
+**With both fixed, the index still does not persist**, checked four
+independent ways after a clean submission with no error path taken:
+`sys_index` (filtered query, still zero rows after a 30-second wait),
+`staged_alter_history` (ServiceNow's own schema-alteration tracking
+table - completely empty, for every table, not just this one),
+`sys_email` (no completion notification, despite the wizard's own
+embedded UI text describing one: *"the system will send you a
+confirmation email"*), and `sys_dictionary` (still no native uniqueness
+field). `sys_index_suggestion`, a separate automatic slow-query-advisor
+feature discovered while searching for an alternative tracking table,
+was also checked and is unrelated (empty, and not the mechanism a
+manually-requested index goes through).
+
+This is a stronger negative result than the original finding above, not
+a repeat of it: the two most plausible explanations for the gap
+(privilege, dirty data) were directly tested and eliminated, narrowing
+what's actually going on without resolving it. Full account: FL-0018,
+OB-0016. Because no enforcement could be independently verified as
+active, §3b's concurrency experiment was **not** rerun under an
+"enforced" premise - see §6 and §7 for how this changes the recommended
+next step.
 
 ### 3b. Concurrency experiment: what happens today, with no enforced constraint
 
@@ -370,9 +413,10 @@ identity is a publisher-contract problem, not a field-availability one.
 ## 5. Tradeoffs
 
 - **A (target-side):** Would be the strongest guarantee *if* achievable,
-  but this round's direct attempt to achieve it (with genuine admin
-  access, not blocked by ADR 0004's least-privilege stance) did not
-  succeed in three separate ways (FL-0018), and the concurrency
+  but repeated direct attempts to achieve it (with genuine, verified-
+  elevated admin access, not blocked by ADR 0004's least-privilege
+  stance, and with the one real data problem the platform itself flagged
+  fixed) did not succeed (FL-0018, OB-0016), and the concurrency
   experiment confirms the unconstrained failure mode is real and current
   (OB-0014). The most robust untested route (Import Set + coalesce)
   remains an architecture change, not a config tweak, and was not
@@ -401,13 +445,23 @@ FL-0017, independent of whichever of A/C is eventually chosen here.
   **resolved this round:** yes, observed reliably in §3b's concurrency
   experiment (both newly-created records were immediately visible to an
   independent follow-up query).
-- **New, and now the most load-bearing open question:** *why* did
-  ServiceNow's admin-UI index-creation wizard accept a fully-configured
-  unique-index request and return success-shaped responses three
-  separate times without ever persisting a record (FL-0018)? Genuinely
-  unknown - could be a licensing gate, an async job this session didn't
-  wait for, or an instance quirk. This determines whether Candidate A
-  is actually infeasible here or just not yet achieved.
+- **Still the most load-bearing open question, now narrowed rather than
+  resolved:** *why* does ServiceNow's admin-UI index-creation wizard
+  accept a fully-configured unique-index request and return
+  success-shaped responses without ever persisting a record (FL-0018)?
+  A same-day follow-up (FL-0018, OB-0016) directly tested and eliminated
+  the two most plausible explanations - `security_admin` not being
+  elevated for the session, and duplicate data in the target column -
+  and the gap remained after fixing both, confirmed via a real
+  30-second wait plus three independent tables
+  (`sys_index`/`staged_alter_history`/`sys_email`), none of which show
+  any trace of the operation completing. What remains genuinely unknown
+  is whether this is a licensing/edition gate, a code path this
+  particular wizard doesn't actually reach, or something this browser
+  session simply cannot observe (e.g. a server-side log only visible to
+  ServiceNow's own support tooling). This determines whether Candidate A
+  is actually infeasible here or just not yet achieved - and is now past
+  what further UI-only investigation can resolve (see §7).
 - Whether Import Set + Transform Map coalesce is configurable in this
   instance - **still not attempted.** This round investigated `sys_index`
   instead (the mechanism actually surfaced by inspecting the schema
@@ -431,33 +485,56 @@ FL-0017, independent of whichever of A/C is eventually chosen here.
 
 ## 7. Recommendation: smallest next experiment to discriminate between the strongest candidates
 
-**Still not selecting an architecture.** This round's evidence shifted
-the picture - it did not fully discriminate between A and C. The
-concurrency experiment (§3b) conclusively shows the unconstrained
-configuration fails, which is real, useful evidence, but it does not
-prove ServiceNow *can't* enforce this - only that this session's
-attempts to make it enforce it, across three well-formed tries with
-genuine admin access, didn't work, for a reason that was never
-explained (FL-0018). Writing an ADR for Candidate C now would mean
-choosing it mainly by elimination, on the strength of one unresolved,
-instance-specific UI obstacle rather than a confirmed platform
-limitation. Per the same discipline this investigation has applied
-throughout, that gap is not yet enough to justify a decision.
+**Still not selecting an architecture - but this round changes what the
+smallest next step actually is.** The concurrency experiment (§3b)
+conclusively shows the unconstrained configuration fails, which is real,
+useful evidence, but on its own it does not prove ServiceNow *can't*
+enforce this - only that it doesn't today. The same-day follow-up
+(FL-0018, OB-0016) went further: it specifically tested and eliminated
+this document's own previously-recommended explanations (privilege,
+dirty data) and the gap remained. That is a materially different
+evidentiary position than the original recommendation was written
+against - "we haven't ruled out the obvious causes yet" has become "the
+obvious causes are ruled out, and it still doesn't work."
 
-**Recommended smallest next experiment:** resolve *why* §3a's index
-creation attempts didn't persist, before doing anything larger -
-concretely, either (a) consult ServiceNow's own support/documentation
-channel for this specific symptom (a `200`-status "Database Indexes"
-wizard submission that never results in a persisted `sys_index` record),
-or (b) retry the same steps after allowing for a longer wait (in case
-it's an asynchronous background job rather than a synchronous rejection)
-and checking ServiceNow's system logs (`syslog`) for any server-side
-trace of the attempt that the UI itself didn't surface. This is smaller
-than either remaining larger step - prototyping Candidate C's durable
-store, or attempting the separate, unverified Import Set + coalesce path
-- and its answer is the one thing that would most directly resolve
-whether Candidate A remains a live option at all, rather than continuing
-to weigh it against C on incomplete information.
+Writing an ADR for Candidate C now would still mean choosing it mainly
+by elimination rather than by C's own merits being tested - so this
+document still stops short of that. But continuing to treat "check with
+more privilege" as the next step would be repeating an experiment this
+round already ran to a clean, negative conclusion.
+
+**Recommended smallest next experiment:** two independent, smaller
+paths, not one big one, because they no longer compete for the same
+next slice of effort:
+
+1. **Open a real ServiceNow support case for this specific symptom**
+   (a `200`-status "Database Indexes" wizard submission, on an
+   elevated-privilege session, against a column with no duplicate
+   values, that never results in a persisted `sys_index` record, no
+   error surfaced, and no trace in `sys_index`, `staged_alter_history`,
+   or `sys_email`). This is the smallest possible action left - it
+   requires no further engineering, and it is now the only route left to
+   a real answer to *why*, since this session has exhausted what browser-
+   only investigation can observe. Outside this project's normal
+   engineering loop, so explicitly not something to block on.
+2. **Independent of (1), and smaller than fully building Candidate C:**
+   prototype the *smallest possible slice* of Candidate C - not the full
+   durable-state design from §4, just enough to answer one question
+   symmetrically to what this document has been doing for Candidate A
+   all along: does a minimal compare-and-set idempotency-key store
+   (e.g. a single table with a real unique constraint, in infrastructure
+   this project actually controls) reliably reject a second concurrent
+   write for the same key? That is the direct C-side counterpart to
+   §3b's experiment, and this project has not yet run it. Running it
+   would, for the first time, let the two strongest candidates be
+   compared on matched evidence (both tested under real concurrency)
+   rather than "A is stuck, C is untested."
+
+Either result from (2) would be informative even before (1) resolves:
+if a minimal datastore-level constraint *does* reject the second writer
+reliably, that's a concrete data point that C's core mechanism is
+achievable with infrastructure this project already knows how to run -
+independent of whatever is or isn't wrong with this ServiceNow instance.
 
 ---
 

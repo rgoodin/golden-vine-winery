@@ -814,6 +814,94 @@ guessing at through the UI. See
 `docs/architecture/0001-reliability-architecture-spike.md` for how this
 folds into the candidate comparison.
 
+#### Follow-up 2026-09-15: two real causes found and fixed; the index still does not persist
+
+Resumed this investigation specifically to resolve the mystery above.
+Found and eliminated two genuine causes — but the underlying question is
+still not answered.
+
+**Cause 1 (found and fixed): `security_admin` was assigned but not
+elevated for the session.** `g_user.hasRole('security_admin')` returned
+`true` throughout, which is misleading — ServiceNow separates *having*
+a role from that role being *active* in a session for roles flagged as
+elevated-privilege. The admin user's own avatar menu exposed an
+"Elevate role" action; checking `security_admin` there and confirming it
+changed the avatar's own `aria-label` from `"System Administrator:
+Available"` to `"System Administrator: security_admin, Available"` —
+independently confirming elevation was genuinely active, not just
+attempted. **This was a real, necessary step**, not a false lead: before
+elevation, submitting the index-creation wizard produced a silent `200`
+response with no feedback (the original observation above). After
+elevation, submitting the *exact same* wizard against the *exact same*
+field produced a real, specific, actionable browser `alert()`:
+*"Requested fields (u_gv_business_operation_id) contain duplicate
+values. Please remove the duplicate values and then try again."*
+Elevation didn't just add access — it changed what ServiceNow was
+willing to tell this session about why an operation failed.
+
+**Cause 2 (found and fixed): that alert was correct.** OB-0014's own
+concurrency experiment had left exactly one duplicate pair in place —
+`INC0010009` and `INC0010010` both carry
+`u_gv_business_operation_id = 8a323db6-c582-4f2f-b54a-f25320bd1e3a`,
+which is precisely what a real unique-index build would refuse to index.
+Cleared the field on `INC0010009` (not deleted — the record itself is
+untouched) via the standard Incident form, verified independently via a
+fresh list query that only one record now carries a value for that
+field, confirming ServiceNow's stated blocking reason was accurate, not
+a red herring.
+
+**Retried with both causes fixed — still no persisted index.** Elevated
+session, no duplicate values, same wizard, same field, "Unique Index"
+checked: this time the submission returned `200`/`200` with **no**
+alert and **no** `confirm()` call (both were stubbed and observed, per
+this project's standing rule against triggering native browser dialogs
+via automation — neither fired). The second response's payload
+contained embedded UI message-catalog text reading (in part) *"Index
+creation successfully scheduled... ServiceNow will generate your index
+for you in the background... Upon completion of the index generation,
+the system will send you a confirmation email."* That text is
+**inconclusive on its own** — it's a client-side i18n message
+definition bundled with the response, not proof the message was
+actually shown or that a job was actually queued. Checked for
+independent, harder evidence instead, after waiting 30 seconds:
+
+- `sys_index_list.do` filtered on `logical_table_name=incident`: still
+  zero rows (same query already confirmed to filter correctly, not
+  silently ignored).
+- `staged_alter_history` (the table ServiceNow itself uses to track
+  in-progress schema alterations): **zero records — for any table,
+  ever**, in this instance. Not just no record for our attempt; the
+  table has never recorded a single staged alter.
+- `sys_email_list.do`: no email resembling an index-completion
+  notification; the most recent entry predates this round's attempts.
+- `sys_index_suggestion` (a *different*, automatic slow-query-driven
+  advisor feature discovered while searching for alternative
+  index-tracking tables): also empty, and unrelated to a manually
+  requested index — a dead end, not the missing mechanism.
+- `sys_dictionary` for `u_gv_business_operation_id` still exposes no
+  `unique`/`is_unique`/`db_unique`-named field of any kind, consistent
+  with the very first finding in this entry.
+
+Three independent tables and a direct re-check of the field's own
+dictionary entry all agree: no unique constraint exists. The
+"successfully scheduled" wording appears to be dead UI copy for a
+job-queuing path this instance's `indexConfirm()` handler does not
+actually reach, or reaches without effect — which specific case is true
+remains unknown.
+
+**Where this leaves the investigation:** the two most likely blockers a
+reasonable person would guess at (privilege elevation, dirty data) have
+both been directly tested, found real, and fixed — and the index still
+doesn't persist. That rules out the two most likely explanations without
+resolving the mystery. Per this round's explicit instruction, no further
+workaround (application-level locking, lookup-before-create, or any
+other idempotency mechanism) was attempted as a substitute. See
+`docs/architecture/0001-reliability-architecture-spike.md` §3a for how
+this changes the candidate comparison. The core answer is unchanged from
+the original entry: the target-side uniqueness mechanism could not be
+verified as active, so the concurrency experiment was not rerun under a
+claimed "enforced" premise — see OB-0016.
+
 ---
 
 <!-- Add new entries above this line, most recent first. -->

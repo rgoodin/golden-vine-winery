@@ -70,16 +70,27 @@ no enforced constraint in place, both concurrent requests succeeded —
 two Incidents were created for one business operation (OB-0014),
 directly confirming the failure mode is real. Getting an actual
 platform-enforced unique index working turned out to be its own
-unresolved obstacle: three well-formed attempts via ServiceNow's own
+unresolved obstacle: well-formed attempts via ServiceNow's own
 index-creation UI all returned success-shaped responses without ever
 persisting a constraint, for a reason that was never explained
-(FL-0018). This weakens target-side idempotency's near-term
-attractiveness without eliminating it, and still doesn't fully
-discriminate between it and integration-owned durable state — see
+(FL-0018). **A same-day follow-up then directly tested and fixed the two
+most plausible explanations** — `security_admin` was assigned but never
+*elevated* for the session (fixed; confirmed via the platform's own UI
+state), and the target column genuinely held a duplicate value left over
+from the concurrency test itself (fixed; verified independently). With
+both fixed, the index still didn't persist, checked four independent
+ways (`sys_index`, `staged_alter_history`, `sys_email`, `sys_dictionary`
+— OB-0016). This is stronger negative evidence than before, not just a
+repeat — the obvious causes are now ruled out, not merely unexamined.
+This weakens target-side idempotency's near-term attractiveness without
+eliminating it, and still doesn't fully discriminate between it and
+integration-owned durable state — see
 `docs/architecture/0001-reliability-architecture-spike.md` §7 for the
-updated recommendation (resolve why index creation silently failed,
-rather than jumping to build either candidate). Still no architecture
-chosen, no ADR written.
+updated recommendation (open a ServiceNow support case for the
+unexplained symptom, and separately prototype the smallest possible
+slice of the durable-state candidate so both candidates are eventually
+compared on matched evidence). Still no architecture chosen, no ADR
+written.
 
 Also proposed but deliberately not built: giving the audit tool its own
 incremental "last audited position" so repeat runs don't always re-sweep
