@@ -10,19 +10,20 @@ below). One service exists so far:
     services/integration-service/   Node.js + TypeScript
 
 **Phase 1's first milestone is done:** a real Salesforce Platform Event
-(`Distributor_Onboarding_Requested__e`, one field so far:
-`Distributor_Name__c`) has been published and received end-to-end by the
-integration service, via JWT Bearer Flow auth
+(`Distributor_Onboarding_Requested__e`, full canonical field set — see
+`docs/decisions/0003-platform-event-schema.md`) is published and received
+end-to-end by the integration service, via JWT Bearer Flow auth
 (`docs/decisions/0002-authentication-strategy.md`) and a real Pub/Sub API
 gRPC subscription (`docs/decisions/0001-integration-architecture.md`,
-`src/salesforce/pubsubClient.ts`). See `docs/devex/observations.md`
-(OB-0004) for how it was proven and `docs/devex/friction-log.md`
-(FL-0001–FL-0006) for everything learned getting there.
+`src/salesforce/pubsubClient.ts`). The subscriber maps the flat Platform
+Event fields back onto the nested canonical `DistributorOnboardingRequested`
+shape from this file (`src/salesforce/subscriber.ts`). See
+`docs/devex/observations.md` (OB-0004, OB-0005) for how it was proven and
+`docs/devex/friction-log.md` (FL-0001–FL-0006) for everything learned
+getting there.
 
-Not yet built: mapping decoded Platform Event fields onto the canonical
-nested event shape in `src/types/events.ts` (the real object is still just
-one flat field), the ServiceNow adapter, and retry/idempotency handling.
-See `services/integration-service/README.md` for current status.
+Not yet built: the ServiceNow adapter and retry/idempotency handling. See
+`services/integration-service/README.md` for current status.
 
 A Salesforce Developer Edition org and an External Client App (JWT Bearer
 Flow, pre-authorized) have been set up for testing; credentials live in

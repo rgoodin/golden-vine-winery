@@ -4,19 +4,20 @@ Receives `DistributorOnboardingRequested` events from Salesforce and (once
 built) forwards them to a ServiceNow adapter. See the root
 [`CLAUDE.md`](../../CLAUDE.md) for the full architecture and phase roadmap.
 
-## Status: Phase 1, first event proven end-to-end
+## Status: Phase 1, full canonical event proven end-to-end
 
 The Salesforce Pub/Sub API subscriber authenticates (JWT bearer flow) and
-receives real events from the dev org. A minimal
-`Distributor_Onboarding_Requested__e` Platform Event (one field,
-`Distributor_Name__c`) exists in Salesforce, and publishing a test event
-via `npm run publish-test-event` has been confirmed to reach the
-subscriber. See `docs/devex/observations.md` (OB-0004) and
+receives real events from the dev org. `Distributor_Onboarding_Requested__e`
+carries the full canonical field set (see
+`docs/decisions/0003-platform-event-schema.md`), and the subscriber maps
+the flat fields back onto the nested `DistributorOnboardingRequestedEvent`
+shape from `src/types/events.ts`. `npm run publish-test-event` publishes a
+fully-populated test event and has been confirmed to reach the subscriber
+correctly mapped. See `docs/devex/observations.md` (OB-0004, OB-0005) and
 `docs/devex/friction-log.md` (FL-0001–FL-0006).
 
-Still not built: the full canonical event schema (only one field exists
-so far), mapping onto `src/types/events.ts`'s nested shape, and everything
-past the subscriber (ServiceNow adapter, retries, idempotency).
+Still not built: everything past the subscriber (ServiceNow adapter,
+retries, idempotency).
 
 ## Stack
 
@@ -49,10 +50,6 @@ npm run publish-test-event -- "Some Distributor Name"
 
 ## What's deliberately not here yet
 
-- The rest of the canonical event's fields on the Platform Event object
-  (only `Distributor_Name__c` exists so far)
-- Mapping the Platform Event's real (flat) fields onto the canonical
-  nested event shape in `src/types/events.ts`
 - ServiceNow adapter
 - Retry / dead-letter handling
 - Idempotency handling

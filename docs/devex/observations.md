@@ -127,4 +127,27 @@ experience documented along the way.
 
 ---
 
+### OB-0005: Expanded Platform Event to full canonical schema via Tooling API
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Category:** environment setup / testing
+
+Added the remaining 9 fields to `Distributor_Onboarding_Requested__e`
+(`scripts/create-platform-event-fields.ts`, via the Tooling API's
+`CustomField` sobject, using our existing JWT credentials rather than
+clicking through Setup 9 times — a deliberate developer choice, not an
+assumption). See `docs/decisions/0003-platform-event-schema.md` for the
+full field mapping and why the canonical event stays nested while
+Salesforce's fields stay flat.
+
+Updated `subscriber.ts` to map the flat fields back onto the nested
+canonical `DistributorOnboardingRequestedEvent` shape (`toCanonicalEvent`),
+and `scripts/publish-test-event.ts` to populate all fields. Ran the full
+loop again end-to-end — the subscriber now logs the exact nested shape
+from `CLAUDE.md`'s example payload, reconstructed from the flat Salesforce
+record.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->
