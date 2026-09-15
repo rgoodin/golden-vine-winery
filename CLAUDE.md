@@ -59,38 +59,36 @@ state, and Salesforce's `ManagedSubscribe`/`CommitReplay` (read directly
 from the proto: it's explicit open beta and only ever addresses the
 replay/checkpoint problem, never the side-effect atomicity one) against
 every failure mode reproduced so far. Two candidates fully cover the
-demonstrated failures on paper; the evidence doesn't yet fully
-discriminate between them. **A focused follow-up then did exactly what
-the spike recommended** — a human admin session (not the deliberately
-least-privileged `itil` integration user) investigated ServiceNow's
-actual uniqueness mechanisms, and a genuine **concurrency** experiment
-(two simultaneous create requests via `Promise.all`, not
-lookup-then-create) was run against a dedicated test field. Result: with
-no enforced constraint in place, both concurrent requests succeeded —
-two Incidents were created for one business operation (OB-0014),
-directly confirming the failure mode is real. Getting an actual
-platform-enforced unique index working turned out to be its own
-unresolved obstacle: well-formed attempts via ServiceNow's own
-index-creation UI all returned success-shaped responses without ever
-persisting a constraint, for a reason that was never explained
-(FL-0018). **A same-day follow-up then directly tested and fixed the two
-most plausible explanations** — `security_admin` was assigned but never
-*elevated* for the session (fixed; confirmed via the platform's own UI
-state), and the target column genuinely held a duplicate value left over
-from the concurrency test itself (fixed; verified independently). With
-both fixed, the index still didn't persist, checked four independent
-ways (`sys_index`, `staged_alter_history`, `sys_email`, `sys_dictionary`
-— OB-0016). This is stronger negative evidence than before, not just a
-repeat — the obvious causes are now ruled out, not merely unexamined.
-This weakens target-side idempotency's near-term attractiveness without
-eliminating it, and still doesn't fully discriminate between it and
-integration-owned durable state — see
-`docs/architecture/0001-reliability-architecture-spike.md` §7 for the
-updated recommendation (open a ServiceNow support case for the
-unexplained symptom, and separately prototype the smallest possible
-slice of the durable-state candidate so both candidates are eventually
-compared on matched evidence). Still no architecture chosen, no ADR
-written.
+demonstrated failures on paper: target-side ServiceNow idempotency and
+integration-owned durable state. Three focused follow-ups then tested
+both directly rather than continuing to reason from documentation:
+
+1. **A genuine concurrency test against ServiceNow** (two simultaneous
+   create requests via `Promise.all`, not lookup-then-create) confirmed
+   the unconstrained failure mode is real: with no enforced uniqueness
+   constraint, both requests succeeded, creating two Incidents for one
+   business operation (OB-0014).
+2. **Getting ServiceNow to actually enforce a unique index remains
+   unresolved**, despite real admin access, correctly elevating
+   `security_admin` for the session (a genuine platform distinction —
+   assigned vs. active), and removing a duplicate-data blocker the
+   platform itself flagged. Even with every plausible cause ruled out,
+   ServiceNow's index-creation UI returns success-shaped responses
+   without ever persisting a constraint, checked four independent ways
+   (FL-0018, OB-0016).
+3. **A matching investigation-only prototype of the durable-state
+   candidate** (`node:sqlite`, zero new dependency, a real `PRIMARY KEY`
+   constraint as the atomic gate) showed the opposite mix: its core
+   duplicate-prevention mechanism works cleanly, 5/5 concurrent trials
+   (OB-0017) — but simulating a crash between acquiring ownership and
+   calling ServiceNow causes **permanent silent loss**, with no reclaim
+   mechanism designed or built (OB-0018), the same lesson as LL-0009's
+   checkpoint-ordering finding, now confirmed for this candidate too.
+
+Both candidates now have a specific, named, unresolved blocker rather
+than a vague "needs more investigation" — see
+`docs/architecture/0001-reliability-architecture-spike.md` §7 for both.
+Still no architecture chosen, no ADR written.
 
 Also proposed but deliberately not built: giving the audit tool its own
 incremental "last audited position" so repeat runs don't always re-sweep

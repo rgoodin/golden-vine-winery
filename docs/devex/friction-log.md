@@ -904,4 +904,46 @@ claimed "enforced" premise — see OB-0016.
 
 ---
 
+### FL-0019: `node:sqlite` has no type coverage in this project's pinned `@types/node`
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+
+#### Observation
+
+Building the durable-state idempotency prototype (`scripts/lib/idempotencyStore.ts`,
+OB-0017/OB-0018), chose `node:sqlite` deliberately - it ships with
+Node 22 (confirmed available, if experimental, on this project's
+Node 22.18.0), giving a real atomic `PRIMARY KEY` constraint with zero
+new npm dependency, which fits this project's minimalism better than
+adding a SQLite driver package for an investigation-only script.
+
+#### Friction
+
+TypeScript has no idea `node:sqlite` exists. This project's
+`@types/node` is pinned to `^20.14.10` (a version that predates the
+module), so `import { DatabaseSync } from 'node:sqlite'` fails to
+type-check with no ambient types available.
+
+#### Impact
+
+Minor, but real: had to hand-write a small local interface
+(`SqliteStatement`/`SqliteDatabase`) covering only the handful of
+methods actually used, and load the module via `require(...)` cast to
+that shape instead of a normal typed `import`. Correct and fully typed
+where it matters, but is a slightly unusual pattern compared to the
+rest of this codebase's imports, and would need to be
+revisited/simplified if `node:sqlite` is ever used somewhere less
+disposable than an investigation script.
+
+#### Possible Enablement
+
+If durable state ends up chosen as the real architecture (not yet
+decided - see the architecture spike), bump `@types/node` to a version
+that covers `node:sqlite` at that point, rather than now for a
+throwaway prototype. Not done here - out of scope for an investigation
+script per this round's instructions.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

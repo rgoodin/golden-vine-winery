@@ -1,13 +1,15 @@
 # Architecture Spike: Guaranteeing Exactly-One Incident per Business Event
 
 **Status:** SPIKE — investigation only. No decision made, no ADR written.
-**Date:** 2026-09-15 (updated twice same day: a focused ServiceNow
-target-side idempotency follow-up — §3a/§3b — and then a direct
-continuation resolving two real causes behind §3a's open question,
-without resolving the question itself — see §3a's "Follow-up" note)
-**Related:** `docs/devex/friction-log.md` FL-0011–FL-0018,
-`docs/devex/observations.md` OB-0007–OB-0016,
-`docs/devex/lessons-learned.md` LL-0005–LL-0012,
+**Date:** 2026-09-15 (updated three times same day: a focused ServiceNow
+target-side idempotency follow-up — §3a/§3b — a direct continuation
+resolving two real causes behind §3a's open question, without resolving
+the question itself — see §3a's "Follow-up" note — and then an
+investigation-only durable-state prototype tested under matched
+concurrency — see §4's "C-prototype" subsection)
+**Related:** `docs/devex/friction-log.md` FL-0011–FL-0019,
+`docs/devex/observations.md` OB-0007–OB-0018,
+`docs/devex/lessons-learned.md` LL-0005–LL-0013,
 `docs/decisions/0001`–`0004`
 
 ## Purpose
@@ -355,18 +357,74 @@ project has never needed and doesn't have.
 
 | Failure mode | Result |
 |---|---|
-| Crash before target side effect | Ambiguous without careful design - an "in-flight" mark alone doesn't prove whether ServiceNow was actually called; would need reconciliation (cf. the audit tool) unless the store atomically captures the ServiceNow response |
-| Crash after target side effect, before checkpoint | **Solved**, if implemented correctly - a retry sees "already completed" and skips re-creating |
+| Crash before target side effect | **Confirmed ambiguous, not just theorized** - see the prototype below (OB-0018): an "in-flight" mark alone doesn't prove whether ServiceNow was actually called, and directly causes permanent silent loss without a reconciliation/reclaim mechanism, which was not built |
+| Crash after target side effect, before checkpoint | **Confirmed solved** for the duplicate-prevention half (OB-0017) - a second concurrent attempt never even reaches ServiceNow |
 | Replay/redelivery | **Solved**, same mechanism |
-| Duplicate source publication | **Solved** - keyed on business identity, not replay position, matching Candidate A's coverage |
+| Duplicate source publication | **Confirmed solved** (OB-0017) - keyed on business identity, not replay position, matching Candidate A's intended coverage, and unlike Candidate A this was verified working, not just designed |
 | Temporary ServiceNow failure | Could be extended to support real retry-with-backoff, which no other candidate addresses - but designing that further is out of this investigation's scope |
-| Process restart | **Solved**, same as the crash cases above |
+| Process restart | Same open gap as "crash before target side effect" above - confirmed, not solved |
 
 Most complete and most platform-agnostic candidate on paper, but the
 largest to build - real durable storage is net-new infrastructure for
 this project, and it doesn't remove the need to also decide checkpoint
 ordering; it solves the business-idempotency problem independently of,
 not instead of, that decision.
+
+#### C-prototype. Investigation-only durable-state prototype (this round's follow-up)
+
+With ServiceNow's own target-side uniqueness left unverified (FL-0018,
+OB-0016), built the smallest possible prototype of this candidate to
+test it under the same adversarial concurrency used against ServiceNow
+in the earlier round (§3b) - deliberately **not** wired into `src/`,
+per this round's explicit "investigation only" instruction.
+
+`services/integration-service/scripts/lib/idempotencyStore.ts` uses
+`node:sqlite` (built into Node 22, zero new dependency) with a
+`PRIMARY KEY` constraint on the business-operation ID as the atomic
+gate. Every caller attempts an `INSERT` directly - the database
+engine's constraint, not a prior `SELECT`, decides the single winner,
+deliberately avoiding Candidate B's lookup-then-create race.
+
+**Two experiments, two results:**
+
+- **`scripts/test-durable-state-concurrent-idempotency.ts` (OB-0017):**
+  five iterations of two genuinely concurrent attempts (`Promise.all`)
+  per fresh business-operation ID. **5/5 clean** - exactly one winner,
+  confirmed the loser never called ServiceNow at all (not merely that
+  it lost a race at ServiceNow's end, as in §3b), exactly one Incident
+  independently confirmed each time. This is a stronger result in kind
+  than anything achieved for Candidate A - the invariant held by
+  construction, using infrastructure this project fully controls, with
+  none of the unexplained platform opacity that stalled FL-0018.
+  Honesty note carried into OB-0017 itself: because `acquire()` is
+  synchronous and JS is single-threaded, the same caller won all five
+  trials deterministically - this tests whether the primitive
+  structurally enforces the invariant regardless of ordering, not
+  whether it survives a genuine timing race the way §3b's HTTP-based
+  test did. Both are legitimate, different senses of "concurrent."
+- **`scripts/test-durable-state-crash-gap.ts` (OB-0018):** simulates a
+  crash between acquiring ownership and calling ServiceNow (process
+  close/reopen against the same on-disk store, not just a JS variable
+  check), then simulates a redelivery attempt. **Confirmed the
+  predicted failure mode:** the business operation becomes permanently,
+  silently unrecoverable through this path - zero Incidents ever,
+  every future redelivery attempt quietly blocked, indistinguishable
+  from a legitimate in-flight request, no error, no log trail. This is
+  the same lesson as LL-0009's checkpoint-ordering finding
+  (FL-0016/OB-0010), now confirmed to apply to a durable-state gate in
+  front of ServiceNow, not just a checkpoint in front of it.
+
+**Net effect on this candidate's status:** the duplicate-prevention
+half is now demonstrated, not just designed. The crash-gap half is
+demonstrated to be a real, necessary problem to solve, not a
+theoretical edge case - "Solved" in the table above has been
+downgraded from the original design sketch's optimism to "confirmed
+ambiguous" for exactly the cases that matter most. A real
+implementation still needs a specific answer (e.g. a staleness timeout
+plus explicit reclaim path) that was deliberately not designed or built
+here, and that answer would need its own testing (a reclaim that fires
+too eagerly reintroduces OB-0014's duplicate; one that never fires
+reproduces OB-0018's loss).
 
 ### D. Salesforce Pub/Sub `ManagedSubscribe` / `CommitReplay`
 
@@ -423,10 +481,16 @@ identity is a publisher-contract problem, not a field-availability one.
   attempted this round.
 - **B (lookup-before-create):** Smallest, fastest, reuses proven code -
   but a race-prone mitigation, not a guarantee, unless paired with A.
-- **C (durable state):** Most complete and most platform-agnostic, but
-  the largest net-new piece of infrastructure this project would need to
-  build - and doesn't eliminate the checkpoint-ordering question, it sits
-  alongside it.
+- **C (durable state):** Most complete and most platform-agnostic on
+  paper, and now the only candidate with a working prototype behind it
+  (OB-0017: 5/5 clean concurrent trials, using infrastructure this
+  project fully controls, zero new dependency). Still the largest
+  net-new piece of infrastructure this project would need to build for
+  real, and a same-round experiment (OB-0018) confirmed it introduces
+  its own serious failure mode - permanent silent loss on a crash
+  between acquiring ownership and calling ServiceNow - that has no
+  designed answer yet. Doesn't eliminate the checkpoint-ordering
+  question either, it sits alongside it.
 - **D (`ManagedSubscribe`):** Solves a real, already-documented problem
   (FL-0017) but does not touch this investigation's actual question.
   Adopting it without also choosing A or C would look like progress while
@@ -477,64 +541,68 @@ FL-0017, independent of whichever of A/C is eventually chosen here.
 - Whether `ManagedSubscribe`'s open-beta status and support posture are
   acceptable for this project's purposes - not researched beyond the
   proto's own comments.
-- For Candidate C, what minimum durable-storage mechanism would actually
-  be appropriate at this project's scale - not investigated, since it's
-  an implementation detail, not an architecture choice.
+- ~~For Candidate C, what minimum durable-storage mechanism would
+  actually be appropriate at this project's scale~~ - **partially
+  answered this round:** `node:sqlite` with a `PRIMARY KEY` constraint
+  is sufficient to demonstrate the core atomicity mechanism (OB-0017),
+  with zero new dependency. Whether it (vs. a real external datastore)
+  is appropriate for a production implementation, not just a prototype,
+  is still an implementation detail deferred past this investigation.
+- **New this round:** what staleness/reclaim policy would correctly
+  resolve OB-0018's crash-gap failure mode without reintroducing
+  OB-0014's duplicate-on-race failure mode? Not designed or
+  investigated - flagged as the specific next question for Candidate C,
+  symmetric to FL-0018 being the specific next question for Candidate A.
 
 ---
 
 ## 7. Recommendation: smallest next experiment to discriminate between the strongest candidates
 
-**Still not selecting an architecture - but this round changes what the
-smallest next step actually is.** The concurrency experiment (§3b)
-conclusively shows the unconstrained configuration fails, which is real,
-useful evidence, but on its own it does not prove ServiceNow *can't*
-enforce this - only that it doesn't today. The same-day follow-up
-(FL-0018, OB-0016) went further: it specifically tested and eliminated
-this document's own previously-recommended explanations (privilege,
-dirty data) and the gap remained. That is a materially different
-evidentiary position than the original recommendation was written
-against - "we haven't ruled out the obvious causes yet" has become "the
-obvious causes are ruled out, and it still doesn't work."
+**Still not selecting an architecture, and explicitly not writing an ADR
+this round - but the reason has changed.** Earlier rounds stopped short
+of an ADR because the evidence didn't yet discriminate between A and C.
+That is no longer quite true: C now has a real, working prototype behind
+its duplicate-prevention claim (OB-0017), which is more than A has ever
+had. What stops an ADR now is different - **C's own follow-up experiment
+(OB-0018) surfaced a serious, undesigned failure mode in C itself.**
+Choosing C today would mean choosing an architecture whose crash-recovery
+half is a known, confirmed gap, not an unknown one - a worse position
+than "evidence doesn't discriminate," not a better one. An ADR needs
+either A's mystery resolved or C's reclaim problem solved (or at least
+designed and reasoned about), not just "C's happy path works."
 
-Writing an ADR for Candidate C now would still mean choosing it mainly
-by elimination rather than by C's own merits being tested - so this
-document still stops short of that. But continuing to treat "check with
-more privilege" as the next step would be repeating an experiment this
-round already ran to a clean, negative conclusion.
+**Recommended smallest next experiment - two independent paths, neither
+blocking the other:**
 
-**Recommended smallest next experiment:** two independent, smaller
-paths, not one big one, because they no longer compete for the same
-next slice of effort:
-
-1. **Open a real ServiceNow support case for this specific symptom**
-   (a `200`-status "Database Indexes" wizard submission, on an
+1. **Open a real ServiceNow support case for FL-0018's specific
+   symptom** (a `200`-status "Database Indexes" wizard submission, on an
    elevated-privilege session, against a column with no duplicate
    values, that never results in a persisted `sys_index` record, no
    error surfaced, and no trace in `sys_index`, `staged_alter_history`,
-   or `sys_email`). This is the smallest possible action left - it
-   requires no further engineering, and it is now the only route left to
-   a real answer to *why*, since this session has exhausted what browser-
-   only investigation can observe. Outside this project's normal
-   engineering loop, so explicitly not something to block on.
-2. **Independent of (1), and smaller than fully building Candidate C:**
-   prototype the *smallest possible slice* of Candidate C - not the full
-   durable-state design from §4, just enough to answer one question
-   symmetrically to what this document has been doing for Candidate A
-   all along: does a minimal compare-and-set idempotency-key store
-   (e.g. a single table with a real unique constraint, in infrastructure
-   this project actually controls) reliably reject a second concurrent
-   write for the same key? That is the direct C-side counterpart to
-   §3b's experiment, and this project has not yet run it. Running it
-   would, for the first time, let the two strongest candidates be
-   compared on matched evidence (both tested under real concurrency)
-   rather than "A is stuck, C is untested."
+   or `sys_email`). Still the smallest possible action left for
+   Candidate A - it requires no further engineering, and it is the only
+   route left to a real answer to *why*, since this session has
+   exhausted what browser-only investigation can observe. Outside this
+   project's normal engineering loop, so explicitly not something to
+   block on.
+2. **For Candidate C: design (not yet implement) a staleness/reclaim
+   policy for the crash-gap failure mode (OB-0018), then test the
+   *reclaim* mechanism itself under the same adversarial rigor already
+   applied to everything else** - specifically, whether a reclaim
+   window can be chosen that is long enough to avoid falsely reclaiming
+   a request that is still genuinely in flight (which would reintroduce
+   OB-0014's duplicate) while short enough to bound how long a real
+   crash stays unrecoverable. This is smaller than a full production
+   implementation of Candidate C, and it is the one piece of C's design
+   that has gone from "not investigated" to "investigated and found
+   wanting" this round - making it the most load-bearing open question
+   for C, the same way FL-0018's mystery is the most load-bearing open
+   question for A.
 
-Either result from (2) would be informative even before (1) resolves:
-if a minimal datastore-level constraint *does* reject the second writer
-reliably, that's a concrete data point that C's core mechanism is
-achievable with infrastructure this project already knows how to run -
-independent of whatever is or isn't wrong with this ServiceNow instance.
+Both candidates now have a clear, named, specific blocker rather than a
+vague "needs more investigation" - that is real progress toward an
+eventual ADR, even though this document still stops short of writing
+one.
 
 ---
 
@@ -558,3 +626,13 @@ experiment script, following this project's existing pattern of
 investigation-only scripts like `detect-unprocessed-events.ts` - not
 wired into the subscriber or any runtime path). The Salesforce
 subscriber (`pubsubClient.ts`, `checkpoint.ts`) was not modified.
+
+A later round added a third: `scripts/lib/idempotencyStore.ts` and its
+two experiment scripts (`test-durable-state-concurrent-idempotency.ts`,
+`test-durable-state-crash-gap.ts`) - an investigation-only prototype of
+Candidate C's atomic create-if-absent mechanism, using `node:sqlite`
+against a local, gitignored `.idempotency-experiment.sqlite` file. Not
+referenced by `src/`, not wired into the subscriber or `incidentAdapter.ts`,
+and not the production implementation of Candidate C even if C is
+eventually chosen - only enough to test whether its core mechanism
+works and what its own failure modes are (OB-0017, OB-0018).

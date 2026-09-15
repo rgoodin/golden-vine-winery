@@ -802,4 +802,90 @@ instruction.
 
 ---
 
+### OB-0017: Durable-state prototype — atomic create-if-absent held cleanly across 5/5 concurrent trials
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Category:** experiment / reliability
+
+With ServiceNow's target-side uniqueness left unverified (FL-0018,
+OB-0016), built the smallest possible investigation-only prototype of
+Candidate C (integration-owned durable processing state) to test it the
+same adversarial way: two genuinely concurrent attempts for one
+business-operation ID, not lookup-then-create.
+
+`scripts/lib/idempotencyStore.ts` uses `node:sqlite` (built into Node
+22, zero new dependency) with a `PRIMARY KEY` constraint on
+`business_operation_id` as the atomic gate - every caller attempts an
+`INSERT` directly; the database engine's constraint, not a prior
+`SELECT`, decides the single winner. Only the winner ever calls
+ServiceNow. `scripts/test-durable-state-concurrent-idempotency.ts` runs
+this five times with a fresh ID each time via `Promise.all`.
+
+**Result: 5/5 iterations clean.** Exactly one caller acquired ownership
+each time; the loser's `acquire()` returned `false` and it never made an
+HTTP call at all (confirmed in the per-attempt result, not inferred);
+ServiceNow independently confirmed exactly one Incident per business
+operation each time; the durable-state record matched. This is a
+genuinely different shape of result from ServiceNow itself (OB-0014):
+there, the losing request reached ServiceNow and was incorrectly
+accepted; here, the losing request never reaches the external system in
+the first place - the invariant is enforced one layer earlier.
+
+**Honesty check on what "concurrent" means here:** unlike the real
+HTTP-based race against ServiceNow (where either request could win
+unpredictably due to actual network timing), `acquire()` is synchronous
+and JS is single-threaded - `Promise.all([attempt('A'), attempt('B')])`
+means A's synchronous `acquire()` call always runs to completion before
+B's begins, so A deterministically won all 5 iterations. That is not a
+flaw in the experiment; it is the correct, honest characterization of
+what was tested: whether the atomic primitive structurally guarantees
+the invariant regardless of caller ordering (yes, by construction),
+**not** whether it survives a genuine race the way the ServiceNow test
+did. Both are legitimate but different senses of "concurrent," and this
+entry avoids conflating them.
+
+---
+
+### OB-0018: Durable-state prototype — the same gate produces permanent silent loss if the process crashes before calling ServiceNow
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Category:** experiment / reliability
+
+Direct follow-up to OB-0017, prompted by the explicit question: does
+preventing duplicates this way introduce a new failure mode symmetric to
+FL-0016/OB-0010 (checkpoint-before-ServiceNow causing silent loss)?
+`scripts/test-durable-state-crash-gap.ts` deliberately acquires
+ownership of a business-operation ID, then does **not** call ServiceNow
+and does **not** mark it completed - simulating a crash in exactly that
+gap - closes and reopens the SQLite store (a real process-restart
+simulation, not a JS-variable check: the `INSERT` was already durably
+committed to disk before the "crash"), then simulates a redelivery
+attempt for the same ID.
+
+**Result: exactly the predicted failure mode, confirmed rather than
+assumed.** The record survived the simulated crash, still `in_flight`.
+The redelivery attempt's `acquire()` call was blocked (`false`) - the
+store cannot distinguish "someone else is genuinely mid-flight right
+now" from "a prior attempt crashed and never finished"; both look
+identical, a row already exists. An independent ServiceNow query
+confirmed zero Incidents exist for this business-operation ID. This
+business operation can never produce a ServiceNow Incident again through
+this path - permanently and silently, with no error and no log trail
+distinguishing it from a legitimate in-progress request.
+
+**This directly answers the explicit concern behind the experiment:**
+atomically preventing duplicates is necessary but not sufficient: a
+mechanism that trades OB-0014's failure mode (duplicate) for this one
+(permanent silent loss) is not an improvement, it is a different
+failure mode with worse detectability (OB-0014's duplicates were at
+least visible as two Incidents; this failure mode produces zero
+Incidents and zero errors). A real implementation would need a way to
+distinguish stuck from active records - e.g. a staleness timeout plus an
+explicit reclaim path - deliberately not designed or built here, per
+this round's instructions.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

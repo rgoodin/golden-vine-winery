@@ -119,6 +119,20 @@ package (premature until a second integration needs the same thing — see
   resulted. Result and analysis: FL-0018, OB-0014,
   `docs/architecture/0001-reliability-architecture-spike.md` §3b.
   Experimental only - does not touch the subscriber or `incidentAdapter.ts`.
+- `scripts/lib/idempotencyStore.ts` + `scripts/test-durable-state-concurrent-idempotency.ts`
+  + `scripts/test-durable-state-crash-gap.ts` — investigation-only
+  prototype of the integration-owned durable-state candidate (`node:sqlite`,
+  zero new dependency, a real `PRIMARY KEY` constraint as the atomic
+  create-if-absent gate — not lookup-then-create). One script repeats
+  the concurrency experiment above against this local store instead of
+  ServiceNow (5/5 clean trials — OB-0017); the other simulates a crash
+  between acquiring ownership and calling ServiceNow, confirming that
+  doing so causes permanent silent loss unless a reclaim mechanism is
+  added, which was not built (OB-0018). Not wired into `src/` or any
+  runtime path; writes to a local, gitignored `.idempotency-experiment.sqlite`
+  file. Full analysis:
+  `docs/architecture/0001-reliability-architecture-spike.md` §4
+  ("C-prototype"), `docs/devex/lessons-learned.md` LL-0013.
 - `EXPERIMENT_CRASH_BEFORE_CHECKPOINT=true npm run dev` — deterministic
   test-only crash point in `pubsubClient.ts`: exits right after an event
   is successfully processed but before its checkpoint is persisted, for
@@ -155,12 +169,17 @@ and
   enforced uniqueness constraint, two simultaneous create requests for
   the same business operation both succeeded, producing two Incidents -
   confirming the failure mode is real. Getting ServiceNow to actually
-  enforce a unique index was attempted (with real admin access, not by
-  expanding the integration's own `itil` credentials) and proved
-  inconclusive - three well-formed attempts returned success-shaped
-  responses without ever persisting a constraint. **No architecture has
-  been chosen and no fix has been built** - see the spike doc's §7 for
-  the current recommended next step.
+  enforce a unique index was attempted repeatedly, including with real
+  elevated admin access and after removing a duplicate-data blocker the
+  platform itself flagged, and remains unresolved - see FL-0018. A
+  matching prototype of the integration-owned durable-state candidate
+  (`scripts/lib/idempotencyStore.ts`) then showed the opposite mix: its
+  core duplicate-prevention mechanism works cleanly (5/5 trials), but a
+  crash between acquiring ownership and calling ServiceNow causes
+  permanent silent loss, with no reclaim mechanism designed or built
+  yet (OB-0017, OB-0018). **No architecture has been chosen and no fix
+  has been built** - see the spike doc's §7 for the current recommended
+  next step for each candidate.
 - Giving the audit tool its own incremental "last audited position" so
   repeat runs don't always re-sweep from `EARLIEST` (LL-0011) - proposed,
   not built.

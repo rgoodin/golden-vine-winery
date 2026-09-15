@@ -643,6 +643,66 @@ evidence than the original entry had, not a repeat of it.
 
 ---
 
+### LL-0013: Both candidates have now been tested under matched concurrency — one enforces cleanly, the other trades one failure mode for a worse one
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Evidence:** OB-0017, OB-0018
+
+**Lesson:** For the first time in this investigation, Candidate A
+(target-side idempotency) and Candidate C (integration-owned durable
+state) have been compared on matched evidence rather than "A is stuck,
+C is untested." A minimal, investigation-only prototype of C
+(`scripts/lib/idempotencyStore.ts`, a `node:sqlite` `PRIMARY KEY`
+constraint - zero new dependency) was run against the identical
+adversarial shape used against ServiceNow in OB-0014: two genuinely
+concurrent attempts for one business-operation ID, atomic
+create-if-absent, not lookup-then-create.
+
+**The core mechanism works, cleanly, 5/5 trials (OB-0017).** Unlike
+ServiceNow, where the losing request reached the platform and was
+incorrectly accepted (OB-0014), here the losing request never reached
+ServiceNow at all - the invariant held one layer earlier, by
+construction, because the database engine's own constraint (not
+application code, not a prior read) decided the single winner every
+time. That is a genuinely stronger result in kind than anything FL-0018
+managed to establish for Candidate A, and it was reached with
+infrastructure this project already fully controls, with none of the
+opaque, unexplained platform behavior that stalled the ServiceNow side.
+
+**But the same round that proved this also proved it isn't sufficient
+on its own (OB-0018).** Simulating a crash between "acquire ownership"
+and "call ServiceNow" produced exactly the failure mode this round was
+specifically asked to check for: the business operation becomes
+**permanently, silently unrecoverable** through this path - zero
+Incidents, ever, and every future redelivery attempt is quietly blocked
+by the stuck record, indistinguishable from a legitimate in-flight
+request. This is not a new discovery in shape - it is the same lesson
+LL-0009 already established about checkpoint-before-ServiceNow ordering
+(FL-0016/OB-0010), now shown to apply equally to a durable-state gate
+placed in front of ServiceNow rather than a checkpoint placed in front
+of it. **Wherever the atomicity boundary is drawn, if "record ownership"
+and "the external side effect actually happened" can become
+inconsistent with each other, a crash in that gap is a failure mode,
+not an edge case someone forgot.** Preventing duplicates and avoiding
+silent loss are two separate requirements; a mechanism that only solves
+one is trading, not fixing.
+
+**Where this leaves the comparison:** Candidate C's core atomicity
+mechanism is now demonstrably achievable and correct for the
+duplicate-prevention half of the invariant - stronger evidence than
+Candidate A currently has. But C is not "solved" either: a real
+implementation needs an explicit answer to the crash-gap problem (e.g. a
+staleness timeout and reclaim path) that was deliberately not designed
+here, and that answer has its own failure modes worth testing before
+trusting it (a reclaim that fires too eagerly reintroduces OB-0014's
+duplicate; one that never fires reproduces OB-0018's loss). This is real
+progress, not a decision - see the architecture spike document for
+whether this is enough to justify an ADR or what the next smallest
+experiment is.
+
+---
+
 ## Recommended smallest Phase 3 Enablement experiment (not started)
 
 The prior recommendation (extend the detector to catch duplicates, not
