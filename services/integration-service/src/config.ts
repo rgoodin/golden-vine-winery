@@ -17,4 +17,9 @@ export const config = {
     // FL-0006) - it is NOT automatically PascalCase.
     pubsubTopic: process.env.SALESFORCE_PUBSUB_TOPIC ?? '/event/Distributor_Onboarding_Requested__e',
   },
+  serviceNow: {
+    instanceUrl: process.env.SERVICENOW_INSTANCE_URL ?? '',
+    clientId: process.env.SERVICENOW_CLIENT_ID ?? '',
+    clientSecret: process.env.SERVICENOW_CLIENT_SECRET ?? '',
+  },
 };

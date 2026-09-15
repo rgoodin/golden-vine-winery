@@ -272,4 +272,141 @@ Label or a conceptual/example payload.
 
 ---
 
+### FL-0007: ServiceNow's classic "Application Registry" superseded by "Machine Identity Console"
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+
+#### Observation
+
+Looking for where to create an OAuth integration in ServiceNow to
+authenticate the integration service.
+
+#### Friction
+
+The classic path (System OAuth → Application Registry → New) still exists
+and works, but the list page itself banners "Introducing New Inbound
+Integration Experience" pointing to a completely different UI - the
+**Machine Identity Console** (`/now/machine-identity-console/...`), which
+presents grant types (Authorization Code, Client Credentials, JWT Bearer,
+Resource Owner Password Credentials) as explicit named choices up front,
+unlike the classic form. Easy to miss the banner and build against the
+older, less-guided classic form instead. Same pattern as Salesforce's
+Connected App → External Client App shift (FL-0002).
+
+#### Impact
+
+None this time - the banner was caught before building anything in the
+classic UI. Worth flagging so future developers don't default to outdated
+tutorials/screenshots for ServiceNow OAuth setup either.
+
+#### Possible Enablement
+
+Not decided. Same candidate as FL-0002: a living, UI-current setup doc
+rather than static screenshots.
+
+---
+
+### FL-0008: OAuth Client Credentials grant is disabled by default, with no auto-fix
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+
+#### Observation
+
+Starting a new "OAuth - Client credentials grant" integration in the
+Machine Identity Console.
+
+#### Friction
+
+The very first thing the form shows is a banner: "For client credential
+grants to work, property
+'glide.oauth.inbound.client.credential.grant_type.enabled' must be defined
+and set to true." Checking System Properties confirmed the property didn't
+exist at all in this fresh Developer Instance - not merely set to false.
+The UI lets you fill out and save the entire integration anyway, without
+this being enforced or auto-created.
+
+#### Impact
+
+Would have resulted in a created-but-non-functional integration if the
+banner had been missed or dismissed without action.
+
+#### Possible Enablement
+
+Addressed directly: created the system property (boolean, `true`) via
+System Properties → New before continuing, with the developer's explicit
+go-ahead since it's a platform-wide security switch, not scoped to one
+app. General lesson: a "New" form allowing you to save a broken
+configuration, with the fix documented only in a dismissible banner, is a
+sharp edge worth watching for on any platform.
+
+---
+
+### FL-0009: "OAuth application user" picker searches by first name, not user ID
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+
+#### Observation
+
+Selecting the dedicated `golden.vine.integration` user in the Client
+Credentials grant form's "OAuth application user" field.
+
+#### Friction
+
+Typing the actual username (`golden.vine`) into the picker returned "No
+results found." Typing the first name (`Golden`) found it immediately.
+The field's autocomplete apparently matches display name, not User ID -
+counterintuitive for a field whose purpose is identity, and easy to
+wrongly conclude the user wasn't created successfully.
+
+#### Impact
+
+A few seconds of confusion/re-verification (re-checked the user actually
+existed via the Users list) before trying a different search term.
+
+#### Possible Enablement
+
+None needed structurally - just worth documenting the actual search
+behavior so the next developer doesn't repeat the same false alarm.
+
+---
+
+### FL-0010: `useraccount` Auth Scope silently disables API-level restriction
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+
+#### Observation
+
+Configuring the Auth Scope for the Client Credentials integration, trying
+to restrict it to just the Incident Table API via "Limit authorization to
+the following APIs."
+
+#### Friction
+
+`useraccount` was the only Auth Scope available (a fresh instance has no
+custom scopes). Selecting it disables "Limit authorization to the
+following APIs" entirely - the UI shows "Disabled: useraccount scope
+already grants access to all signed-in user resources" - along with a
+warning that the scope "is not recommended for most integrations." There
+is no way to get meaningful API-level restriction without first using
+"Create auth scope" to define a custom one.
+
+#### Impact
+
+The token's real access boundary ended up being the dedicated user's
+`itil` role (ACLs/business rules), not the OAuth scope itself, which is a
+weaker defense-in-depth story than intended. Documented as a known gap
+rather than solved, per ADR 0004.
+
+#### Possible Enablement
+
+Not pursued yet. Candidate: create a custom Auth Scope limited to the
+Incident Table API if/when this integration needs tighter guarantees than
+"whatever the itil role allows."
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

@@ -150,4 +150,43 @@ record.
 
 ---
 
+### OB-0006: Full Salesforce → ServiceNow chain proven — CLAUDE.md's stated first milestone
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Category:** testing / milestone
+
+Signed up for a ServiceNow Developer Instance (developer did this
+directly, same as the Salesforce signup - not something an agent should
+do on someone's behalf). Discovered the Machine Identity Console as the
+current OAuth setup UI (FL-0007), set up an OAuth Client Credentials grant
+after enabling a required-but-not-default system property (FL-0008),
+created a dedicated `itil`-role integration user rather than using admin,
+and wired it into the integration service
+(`src/servicenow/{auth,incidentAdapter}.ts` -
+`docs/decisions/0004-servicenow-authentication.md`).
+
+Ran the full chain:
+
+    npm run dev
+    npm run publish-test-event -- "Sonoma Valley Distributors"
+
+Result: the subscriber received the Salesforce event, mapped it to the
+canonical shape, and created a real ServiceNow Incident (`INC0010001`)
+with the distributor/contact/sales details in the description and the
+canonical `correlationId` stored in ServiceNow's standard `correlation_id`
+field. Confirmed in the ServiceNow UI that the Incident's activity log
+shows it was created by the dedicated `Golden Vine Integration` user, not
+admin - the least-privilege setup worked as intended.
+
+This is `CLAUDE.md`'s literal "Initial Definition of Success": *"A
+developer successfully causes a realistic Salesforce business event to
+create or update something in ServiceNow, and we have documented what the
+developer experienced while making that happen."* With 10 friction items
+and 6 observations logged so far, this is a natural point to consider
+Phase 2 (Observation Review) before adding more code - see `CLAUDE.md`'s
+"Golden Path Evolution."
+
+---
+
 <!-- Add new entries above this line, most recent first. -->
