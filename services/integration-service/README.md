@@ -13,8 +13,14 @@ a real Pub/Sub API gRPC subscription, mapped onto the canonical nested
 `DistributorOnboardingRequestedEvent` shape (`src/types/events.ts`), and
 used to create a real ServiceNow Incident
 (`docs/decisions/0004-servicenow-authentication.md`). See
-`docs/devex/observations.md` (OB-0006) and `docs/devex/friction-log.md`
-(FL-0001–FL-0010).
+`docs/devex/observations.md` (OB-0001–OB-0007) and
+`docs/devex/friction-log.md` (FL-0001–FL-0012).
+
+Known gaps in that chain — duplicate delivery and a crash-on-ServiceNow-
+failure with no replay checkpoint — have been deliberately tested and
+documented (FL-0011, FL-0012), not yet fixed. See
+`docs/devex/lessons-learned.md` (LL-0005–LL-0007) for the analysis and
+the recommended next experiment before any fix is designed.
 
 ## Stack
 
@@ -59,7 +65,8 @@ package (premature until a second integration needs the same thing — see
 `CLAUDE.md`'s Developer #1 principle).
 
 - `scripts/publish-test-event.ts` — publishes a fully-populated test
-  Salesforce event
+  Salesforce event; pass a fixed correlation ID as a third argument to
+  republish "the same" event (used to test duplicate delivery, FL-0011)
 - `scripts/verify-recent-incidents.ts` — queries ServiceNow for recent (or
   correlation-ID-matched) Incidents, closing the loop without opening the
   ServiceNow UI
@@ -70,16 +77,27 @@ package (premature until a second integration needs the same thing — see
   `CustomField` creation call, extracted so future schema-setup scripts
   don't re-derive it
 
+## Non-interactive auth setup
+
+The other Phase 3 (Enablement) candidate from LL-0003, also acted on:
+platform-specific checklists for setting up service-account OAuth,
+written from what actually happened (not idealized steps) —
+[`docs/runbooks/salesforce-non-interactive-auth-setup.md`](../../docs/runbooks/salesforce-non-interactive-auth-setup.md)
+and
+[`docs/runbooks/servicenow-non-interactive-auth-setup.md`](../../docs/runbooks/servicenow-non-interactive-auth-setup.md).
+
 ## What's deliberately not here yet
 
-- Retry / dead-letter handling
-- Idempotency handling
+- Retry / dead-letter handling and idempotency handling — root causes are
+  understood and documented (FL-0011, FL-0012,
+  `docs/devex/lessons-learned.md` LL-0005–LL-0007), but no fix has been
+  designed or built. The recommended next step is a small replay-checkpoint
+  experiment, not a full retry/idempotency system — see LL-0007's
+  "Recommended smallest Phase 3 Enablement experiment."
 - Tests
 - A narrower ServiceNow OAuth Auth Scope (currently relies on the
   dedicated user's `itil` role rather than API-level token scoping — see
   friction-log.md FL-0010)
-- A per-platform non-interactive-auth checklist (the other Phase 3
-  candidate from LL-0003, not yet built)
 
 These are left out per `CLAUDE.md`'s "smallest useful change" principle —
 they'll be added once friction shows what's actually needed.

@@ -183,4 +183,197 @@ consumer, so a cross-integration package remains premature until Phase 5
 
 ---
 
+## Phase 2 Review — 2026-09-15 (second pass)
+
+Triggered by a deliberate experiment (`OB-0007`) that directly tested two
+of `CLAUDE.md`'s own Developer #1 friction questions — "How do I prevent
+duplicate processing?" and "What happens when ServiceNow is
+unavailable?" — rather than guessing at retry/idempotency requirements.
+Unlike the first review, each lesson below is backed by only one
+friction entry plus the shared `OB-0007` observation of the experiment
+itself; that's treated as sufficient here because the friction was
+*deliberately targeted*, not incidentally noticed, so the "pattern" is
+the question-asked-and-answered, not repetition across unrelated
+incidents. No reliability code is added as part of this review — see
+`docs/devex/friction-log.md` FL-0011/FL-0012 for the raw findings this
+draws on.
+
+| ID | Category | Status |
+|---|---|---|
+| FL-0011 | error handling (duplicate delivery / idempotency) | Open (root cause understood, no fix chosen) |
+| FL-0012 | error handling / observability (failure isolation, recoverability) | Open (root cause understood, no fix chosen) |
+| OB-0007 | testing / error handling | — |
+
+### LL-0005: Duplicate business-event delivery has no idempotency boundary anywhere
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Evidence:** FL-0011, OB-0007
+
+**Lesson:** Publishing the same logical event twice (same
+`Event_Id__c`/`Correlation_Id__c`) produced two separate ServiceNow
+Incidents. This is a directly observed fact: there is no idempotency
+check anywhere in the chain — not on receipt in the subscriber (no dedup
+by `eventId` or `replayId`), and not on the ServiceNow side (Incident
+creation doesn't check for an existing Incident with the same
+`correlation_id` first).
+
+What this test covered, precisely: an upstream/application-level
+duplicate — the same event republished by whatever calls the publish API
+(in production, this would be Salesforce itself, e.g. a re-fired
+workflow). It did **not** test genuine Pub/Sub transport-level
+redelivery — Salesforce's own at-least-once guarantee after a dropped
+connection or a late acknowledgment — which we have not separately
+forced. Both would look identical to the subscriber (the same
+`Correlation_Id__c` arriving twice), so a `correlation_id`-based fix
+would very likely cover both, but that's an inference connecting the two,
+not something independently confirmed for the transport-level case.
+
+**Implication:** Not choosing an architecture here — these are candidates
+to weigh later, not a decision:
+- Query ServiceNow for an existing Incident with the same
+  `correlation_id` before creating one (dedup at the point of the side
+  effect).
+- Track seen `eventId`/`replayId` values in the integration service
+  before calling ServiceNow at all (dedup at the point of receipt).
+- Rely on ServiceNow-side configuration (e.g. a Before Insert Business
+  Rule or a unique constraint on `correlation_id`) so ServiceNow itself
+  refuses/merges the duplicate — shifts the responsibility off the
+  integration service's code entirely.
+
+Each has different failure characteristics (race conditions between
+check-and-create, extra API calls / latency, coupling to ServiceNow admin
+configuration outside this codebase) that haven't been evaluated against
+each other yet. See the connection to LL-0007 below before picking one.
+
+---
+
+### LL-0006: An unhandled per-event error crashes the whole subscriber, and there is no retry of any kind
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Evidence:** FL-0012, OB-0007
+
+**Lesson:** A ServiceNow HTTP failure during event processing threw
+inside the `async` callback passed to the gRPC stream's `'data'`
+listener (`src/salesforce/pubsubClient.ts`). That exception isn't caught
+anywhere in the call chain (`pubsubClient.ts` → `subscriber.ts` →
+`index.ts`), so it surfaced as an unhandled promise rejection and killed
+the Node process — directly confirmed (`ps aux` showed no process
+afterward). There is currently no retry logic anywhere in the code: no
+per-event retry/backoff, no dead-lettering, and no process-level restart
+supervision configured.
+
+Separately, and **not yet tested**: `pubsubClient.ts`'s `stream.on('error', ...)`
+handler (a different code path from the one actually triggered) itself
+calls `throw` synchronously. A gRPC channel-level error — token expiry, a
+network blip — would very plausibly crash the process the same way, via
+this other path. This is a reasonable inference from reading the code,
+not a directly observed failure, and shouldn't be treated as confirmed
+until it's actually forced and watched, the same way FL-0012 was.
+
+**Implication:** Not choosing a fix here — candidates, not a decision:
+- Wrap the per-event handler in a try/catch so one event's failure
+  doesn't propagate to the process, paired with structured logging of the
+  failure (event ID, error) so it isn't silently dropped either — naive
+  catch-and-ignore would trade "loud total outage" for "silent partial
+  data loss," which is not obviously an improvement.
+- Add retry-with-backoff specifically around the ServiceNow call, on the
+  theory that many ServiceNow failures (throttling, transient network
+  issues) are retryable.
+- Add dead-lettering: park failed events somewhere durable for
+  manual/automated reprocessing instead of retrying inline.
+- Add process-level supervision (a restart-on-crash wrapper) as a
+  coarser, complementary safety net regardless of in-code handling.
+
+These aren't mutually exclusive, and none has been evaluated against this
+project's actual failure rate — which is currently unknown, since the
+only failure induced so far was deliberately forced, not naturally
+observed over time.
+
+---
+
+### LL-0007: No replay checkpoint exists, so recovery after a restart is currently impossible — though Salesforce's own retention may make it possible in principle
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Evidence:** FL-0012, code inspection of `src/salesforce/pubsubClient.ts`
+
+**Lesson:** The subscriber always requests `replayPreset: 'LATEST'` on
+connect and never reads or persists `FetchResponse.latestReplayId` — the
+field the Pub/Sub API explicitly provides for this purpose (the proto's
+own comment: "Enables clients... to keep track of their last consumed
+replay"). Even the per-event `replayId` that *is* threaded through
+`pubsubClient.ts` gets dropped one layer up, in `subscriber.ts`, which
+only forwards the decoded payload. Directly confirmed by reading the
+code, not inferred.
+
+Consequence: after any restart (crash or deliberate), the subscriber has
+no way to resume from where it left off — it only receives events
+published after the new connection opens. Whether Salesforce's Pub/Sub
+API could actually replay the "missed" window *if* a replay ID were
+tracked is **not established** — the proto defines a `retention_policy`
+on `TopicInfo` that would answer this via a `GetTopic` call, but nothing
+in this codebase has ever called it. So "events are permanently lost on
+crash," as stated in FL-0012, is accurate for *this codebase's current
+behavior*, but it is not yet established whether that's an inherent
+platform limitation or a gap in what this codebase does with a capability
+Salesforce may already provide.
+
+**Implication:** Not choosing a fix here. The open, directly-testable
+question — not yet answered — is whether capturing and reusing
+`latestReplayId` with `replayPreset: 'CUSTOM'` actually recovers events
+published during a downtime window, and how large that window can be
+(bounded by the topic's retention policy, currently unknown). This is
+squarely a "go observe it" question before a "go build it" one,
+consistent with how FL-0011/FL-0012 themselves were investigated rather
+than assumed.
+
+---
+
+**A connection worth naming explicitly, across LL-0005 and LL-0007:** if
+checkpoint/replay recovery (LL-0007) is ever implemented, it will almost
+certainly *increase* how often duplicate deliveries are seen in practice
+— resuming a stream at a checkpoint is inherently an at-least-once
+operation (the event at or near the checkpoint may be redelivered).
+LL-0005's idempotency gap and LL-0007's checkpoint gap are therefore not
+independent problems to solve on separate schedules: whichever is built
+first should be designed with the other in mind, or the checkpoint work
+should bring its own minimal idempotency handling from the start. This is
+a first-party inference from this project's own event model, not a
+"that's just how these systems are usually built" assumption.
+
+## Recommended smallest Phase 3 Enablement experiment (not started)
+
+Per the evidence above, the single highest-value, smallest next
+experiment is: **capture and use the replay checkpoint, and directly
+observe whether it actually recovers a missed event and/or redelivers
+the last one** — not build a production retry/idempotency system yet.
+
+Concretely (described here, not implemented — out of scope for this
+review):
+
+1. Have `pubsubClient.ts` persist `fetchResponse.latestReplayId`
+   somewhere trivial (e.g. a local file) after each `FetchResponse`.
+2. On startup, if a stored replay ID exists, use `replayPreset: 'CUSTOM'`
+   with it instead of always using `'LATEST'`.
+3. Re-run a variant of the FL-0012 experiment: start the subscriber, stop
+   it (simulating a crash), publish a test event while it's down, then
+   restart and observe directly whether the "missed" event is now
+   received — turning LL-0007's open question into a confirmed result.
+4. While doing so, also directly observe whether that resume redelivers
+   the last successfully-processed event too — confirming or refuting the
+   LL-0005/LL-0007 connection above with first-party evidence rather than
+   an assumption.
+
+Why this over building retry/dead-lettering/idempotency directly
+(LL-0005's and LL-0006's candidates): it's a narrower, more mechanical
+change (thread one field through, persist it, use it on startup) with a
+clear pass/fail observation, and its result directly informs how urgent
+and what-shaped the LL-0005 and LL-0006 work needs to be — rather than
+designing an idempotency/retry scheme before knowing how the platform
+actually behaves on resume.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

@@ -45,10 +45,20 @@ subscriber process — which, combined with the `ReplayPreset: LATEST`
 subscription having no checkpointing, means a crashed-and-unnoticed
 process **silently loses** every event published while it's down, not
 merely delays them. See `docs/devex/observations.md` (OB-0007) for how
-these were tested. Neither has been fixed yet — observation precedes
-enablement; this is the next natural Phase 2 Observation Review input.
-Not yet built: retry / dead-letter handling, idempotency, and tests. See
-`services/integration-service/README.md` for current status.
+these were tested.
+
+**A second Phase 2 Observation Review (LL-0005–LL-0007) has since analyzed
+that finding** — duplicate delivery, failure isolation, Salesforce's
+replay/checkpoint behavior, retry, and recoverability, each with observed
+facts kept explicitly separate from candidate solutions (no architecture
+has been chosen). It also surfaces a real connection between the two
+gaps: fixing checkpoint/replay recovery will likely *increase* how often
+duplicates are seen, so the two shouldn't be designed independently. The
+review's recommended smallest next step — capture the Pub/Sub replay
+checkpoint and directly observe whether it recovers a missed event —
+is proposed, not built. See `docs/devex/lessons-learned.md` for the full
+analysis. Not yet built: retry / dead-letter handling, idempotency, and
+tests. See `services/integration-service/README.md` for current status.
 
 A Salesforce Developer Edition org (External Client App, JWT Bearer Flow)
 and a ServiceNow Developer Instance (Client Credentials grant, dedicated
