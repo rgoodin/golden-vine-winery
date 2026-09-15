@@ -13,14 +13,21 @@ a real Pub/Sub API gRPC subscription, mapped onto the canonical nested
 `DistributorOnboardingRequestedEvent` shape (`src/types/events.ts`), and
 used to create a real ServiceNow Incident
 (`docs/decisions/0004-servicenow-authentication.md`). See
-`docs/devex/observations.md` (OB-0001–OB-0007) and
-`docs/devex/friction-log.md` (FL-0001–FL-0012).
+`docs/devex/observations.md` (OB-0001–OB-0008) and
+`docs/devex/friction-log.md` (FL-0001–FL-0014).
 
-Known gaps in that chain — duplicate delivery and a crash-on-ServiceNow-
-failure with no replay checkpoint — have been deliberately tested and
-documented (FL-0011, FL-0012), not yet fixed. See
-`docs/devex/lessons-learned.md` (LL-0005–LL-0007) for the analysis and
-the recommended next experiment before any fix is designed.
+Two known gaps were deliberately tested rather than assumed:
+
+- **Duplicate delivery** (FL-0011): confirmed — no idempotency boundary
+  exists anywhere, not fixed.
+- **Crash recovery** (FL-0012): a minimal replay-checkpoint experiment
+  (`src/salesforce/checkpoint.ts`) confirmed an event published while the
+  service is offline **can** be recovered via `ReplayPreset.CUSTOM` — see
+  `docs/devex/observations.md` OB-0008. This is a working experiment, not
+  a production reliability feature: the checkpoint is written *after*
+  ServiceNow succeeds, leaving an untested window where a crash could
+  still cause a duplicate (FL-0014, `docs/devex/lessons-learned.md`
+  LL-0008) — the recommended next experiment targets exactly that gap.
 
 ## Stack
 
@@ -76,6 +83,9 @@ package (premature until a second integration needs the same thing — see
 - `scripts/lib/salesforceTooling.ts` — the reusable Tooling API
   `CustomField` creation call, extracted so future schema-setup scripts
   don't re-derive it
+- `scripts/get-topic-info.ts` — calls the Pub/Sub API's `GetTopic` RPC and
+  prints the raw response; used to verify what Salesforce actually
+  exposes (e.g. retention) instead of assuming it (see FL-0013)
 
 ## Non-interactive auth setup
 
@@ -88,12 +98,14 @@ and
 
 ## What's deliberately not here yet
 
-- Retry / dead-letter handling and idempotency handling — root causes are
-  understood and documented (FL-0011, FL-0012,
-  `docs/devex/lessons-learned.md` LL-0005–LL-0007), but no fix has been
-  designed or built. The recommended next step is a small replay-checkpoint
-  experiment, not a full retry/idempotency system — see LL-0007's
-  "Recommended smallest Phase 3 Enablement experiment."
+- A general retry / dead-letter / idempotency solution — root causes are
+  understood and documented (FL-0011, FL-0012, FL-0014,
+  `docs/devex/lessons-learned.md` LL-0005, LL-0006, LL-0008), but no fix
+  has been designed or built. The recommended next step is a small,
+  targeted experiment (deliberately crash between event processing and
+  checkpoint persistence, and observe whether a duplicate results) — see
+  LL-0008's "Recommended smallest Phase 3 Enablement experiment." Not the
+  same as building the fix itself.
 - Tests
 - A narrower ServiceNow OAuth Auth Scope (currently relies on the
   dedicated user's `itil` role rather than API-level token scoping — see

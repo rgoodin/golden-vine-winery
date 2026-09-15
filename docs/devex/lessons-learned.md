@@ -312,67 +312,132 @@ Consequence: after any restart (crash or deliberate), the subscriber has
 no way to resume from where it left off — it only receives events
 published after the new connection opens. Whether Salesforce's Pub/Sub
 API could actually replay the "missed" window *if* a replay ID were
-tracked is **not established** — the proto defines a `retention_policy`
-on `TopicInfo` that would answer this via a `GetTopic` call, but nothing
-in this codebase has ever called it. So "events are permanently lost on
-crash," as stated in FL-0012, is accurate for *this codebase's current
-behavior*, but it is not yet established whether that's an inherent
-platform limitation or a gap in what this codebase does with a capability
-Salesforce may already provide.
+tracked was **not established** at the time this lesson was first
+written — ~~the proto defines a `retention_policy` on `TopicInfo` that
+would answer this via a `GetTopic` call~~. **That claim was wrong — see
+FL-0013.** `GetTopic` was called directly (`scripts/get-topic-info.ts`)
+and returns only `topicName`, `tenantGuid`, `canPublish`, `canSubscribe`,
+`schemaId`, `rpcId`; no retention field exists in this proto at all. The
+actual retention window remains unconfirmed by this project — it isn't
+discoverable via this API's schema, only (if at all) via Salesforce's own
+product documentation, which hasn't been checked.
 
 **Implication:** Not choosing a fix here. The open, directly-testable
 question — not yet answered — is whether capturing and reusing
 `latestReplayId` with `replayPreset: 'CUSTOM'` actually recovers events
 published during a downtime window, and how large that window can be
-(bounded by the topic's retention policy, currently unknown). This is
-squarely a "go observe it" question before a "go build it" one,
-consistent with how FL-0011/FL-0012 themselves were investigated rather
-than assumed.
+(bounded by the topic's retention, still unknown). This is squarely a "go
+observe it" question before a "go build it" one, consistent with how
+FL-0011/FL-0012 themselves were investigated rather than assumed.
+
+**Resolved 2026-09-15 (Phase 3 experiment, OB-0008):** Implemented the
+minimal checkpoint described above (`src/salesforce/checkpoint.ts`,
+wired into `pubsubClient.ts`) and directly tested it: published an event,
+let it process and checkpoint, stopped the subscriber, published a second
+event while offline, then restarted. **The offline event was recovered**
+— received and turned into a ServiceNow Incident after restart, using
+`ReplayPreset.CUSTOM` from the persisted checkpoint. This resolves the
+core question this lesson raised. What remains unresolved: the retention
+window itself (still unknown — untested at any delay beyond roughly a
+minute), and a narrower timing question raised by the experiment itself —
+see LL-0008.
 
 ---
 
-**A connection worth naming explicitly, across LL-0005 and LL-0007:** if
-checkpoint/replay recovery (LL-0007) is ever implemented, it will almost
-certainly *increase* how often duplicate deliveries are seen in practice
-— resuming a stream at a checkpoint is inherently an at-least-once
-operation (the event at or near the checkpoint may be redelivered).
-LL-0005's idempotency gap and LL-0007's checkpoint gap are therefore not
-independent problems to solve on separate schedules: whichever is built
-first should be designed with the other in mind, or the checkpoint work
-should bring its own minimal idempotency handling from the start. This is
-a first-party inference from this project's own event model, not a
-"that's just how these systems are usually built" assumption.
+### LL-0008: The checkpoint-write timing gap is a second, more specific duplicate-delivery vector than the one LL-0005 found
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Evidence:** FL-0014, OB-0008, code inspection of `src/salesforce/pubsubClient.ts`
+
+**Lesson:** The replay-checkpoint experiment (OB-0008) directly tested
+whether `ReplayPreset.CUSTOM` redelivers the already-checkpointed event
+on a clean restart — it does not (confirmed: exactly one ServiceNow
+Incident for the checkpointed event, not two). But that test only
+covered the case where the checkpoint was written *before* the process
+stopped normally. Reading `pubsubClient.ts` shows `saveCheckpoint()` runs
+*after* `onEvent` resolves (i.e. after the ServiceNow Incident is already
+created) — so there is a real window, between an event being fully
+processed and its checkpoint reaching disk, where a crash would leave the
+*previous* checkpoint in place. Restarting from that stale checkpoint
+would very plausibly cause Salesforce to redeliver the just-processed
+event, and the integration service would create a second ServiceNow
+Incident for it — a duplicate, via a different mechanism than LL-0005's
+double-publish scenario (this one is purely about our own persistence
+timing, not about Salesforce or an upstream caller sending the same
+event twice).
+
+This is an inference from reading the code, explicitly **not yet
+directly observed** — no experiment has forced a crash inside that
+specific window.
+
+**Implication:** Not choosing a fix here. This sharpens LL-0005/LL-0007's
+general "checkpointing and idempotency are coupled" observation into a
+specific, testable claim: *a crash between processing and
+checkpoint-persistence causes a duplicate.* That's the next smallest
+thing worth directly observing — see the recommendation below — before
+deciding whether the fix belongs in checkpoint semantics (e.g. write
+checkpoint *before* calling ServiceNow, trading a different failure mode:
+a processed event whose checkpoint says it wasn't), in idempotency at the
+ServiceNow side, or somewhere else. This is also where the "last
+received" vs. "last successfully processed" semantic question
+(deliberately left open per this experiment's instructions) would become
+concretely observable: writing the checkpoint *before* `onEvent` instead
+of after would close the crash-duplication gap but reopen a
+"checkpoint says done, but it wasn't" risk on ServiceNow failure — the
+same trade-off LL-0006 already named for error handling generally.
+
+---
+
+**A connection worth naming explicitly, across LL-0005, LL-0007, and
+LL-0008:** checkpointing and idempotency are not independent problems to
+solve on separate schedules. LL-0007's experiment showed checkpointing
+*can* work without producing a duplicate in the clean-shutdown case, which
+is a real, positive result — but LL-0008 shows the general
+"at-least-once" concern raised when LL-0007 was first written wasn't
+wrong, just imprecise: the risk isn't checkpoint resume *in general*, it's
+specifically the gap between processing and persisting the checkpoint.
+Whichever gets addressed first (idempotency per LL-0005, or checkpoint
+timing per LL-0008) should be designed with the other in mind.
 
 ## Recommended smallest Phase 3 Enablement experiment (not started)
 
-Per the evidence above, the single highest-value, smallest next
-experiment is: **capture and use the replay checkpoint, and directly
-observe whether it actually recovers a missed event and/or redelivers
-the last one** — not build a production retry/idempotency system yet.
+The prior recommendation in this section (capture and use the replay
+checkpoint; observe recovery and redelivery) has been **completed** — see
+OB-0008. This section now recommends the next one.
+
+Per LL-0008, the single highest-value, smallest next experiment is:
+**deliberately crash the subscriber inside the gap between an event being
+processed and its checkpoint being persisted, and directly observe
+whether restarting causes that event to be redelivered and reprocessed
+into a duplicate ServiceNow Incident.**
 
 Concretely (described here, not implemented — out of scope for this
 review):
 
-1. Have `pubsubClient.ts` persist `fetchResponse.latestReplayId`
-   somewhere trivial (e.g. a local file) after each `FetchResponse`.
-2. On startup, if a stored replay ID exists, use `replayPreset: 'CUSTOM'`
-   with it instead of always using `'LATEST'`.
-3. Re-run a variant of the FL-0012 experiment: start the subscriber, stop
-   it (simulating a crash), publish a test event while it's down, then
-   restart and observe directly whether the "missed" event is now
-   received — turning LL-0007's open question into a confirmed result.
-4. While doing so, also directly observe whether that resume redelivers
-   the last successfully-processed event too — confirming or refuting the
-   LL-0005/LL-0007 connection above with first-party evidence rather than
-   an assumption.
+1. Temporarily introduce a way to force an exit between `onEvent`
+   resolving and `saveCheckpoint` being called in `pubsubClient.ts` —
+   e.g. a one-shot env-var-gated `process.exit()` right after `onEvent`
+   returns, so the checkpoint file is deliberately left stale. (Throwaway
+   for the experiment, not a permanent feature.)
+2. Run the experiment: publish an event, let it process and hit the
+   forced exit (checkpoint stays at its *previous* value), restart, and
+   watch — via `verify-recent-incidents.ts` — whether that event now has
+   one Incident or two.
+3. Record the result plainly either way: if a duplicate occurs, that
+   confirms LL-0008's inference with direct evidence and makes the
+   idempotency-vs-checkpoint-ordering trade-off concrete rather than
+   theoretical. If no duplicate occurs, that's equally worth recording —
+   it would mean something about Salesforce's or our own handling is more
+   forgiving than the code reading suggested, which would itself need
+   explaining before being trusted.
 
-Why this over building retry/dead-lettering/idempotency directly
-(LL-0005's and LL-0006's candidates): it's a narrower, more mechanical
-change (thread one field through, persist it, use it on startup) with a
-clear pass/fail observation, and its result directly informs how urgent
-and what-shaped the LL-0005 and LL-0006 work needs to be — rather than
-designing an idempotency/retry scheme before knowing how the platform
-actually behaves on resume.
+Why this over building idempotency or a full retry/dead-letter system
+directly (LL-0005's and LL-0006's candidates): it's the one remaining
+untested assumption underpinning both, and it's cheap to force (a single
+deliberate exit point, no new persistent infrastructure). Its result
+determines whether idempotency work is urgent-and-required or a
+nice-to-have, rather than guessing.
 
 ---
 

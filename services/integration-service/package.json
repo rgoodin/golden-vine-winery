@@ -9,7 +9,8 @@
     "start": "node dist/index.js",
     "publish-test-event": "ts-node scripts/publish-test-event.ts",
     "create-platform-event-fields": "ts-node scripts/create-platform-event-fields.ts",
-    "verify-recent-incidents": "ts-node scripts/verify-recent-incidents.ts"
+    "verify-recent-incidents": "ts-node scripts/verify-recent-incidents.ts",
+    "get-topic-info": "ts-node scripts/get-topic-info.ts"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.10.9",

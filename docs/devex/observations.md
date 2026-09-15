@@ -220,4 +220,79 @@ retry/idempotency design comes next, rather than guessing at requirements.
 
 ---
 
+### OB-0008: Replay checkpoint experiment — offline event successfully recovered
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Category:** error handling / testing / recoverability
+
+Ran the smallest Phase 3 experiment recommended by the second Phase 2
+review (`docs/devex/lessons-learned.md` LL-0007): can a Salesforce event
+published while the integration service is offline be recovered by
+capturing a replay ID and resuming with `ReplayPreset.CUSTOM`? Scope was
+deliberately narrow — no retry framework, dead-letter queue, or
+idempotency solution was built.
+
+**Investigation first:** called the Pub/Sub API's `GetTopic` RPC directly
+(`scripts/get-topic-info.ts`) instead of assuming retention behavior. It
+returned only `topicName`, `tenantGuid`, `canPublish`, `canSubscribe`,
+`schemaId`, `rpcId` — no retention information at all, contradicting an
+earlier (wrong) claim in LL-0007 that the proto exposed a
+`retention_policy` field. See FL-0013.
+
+**Minimal code changes made:**
+- `src/salesforce/checkpoint.ts` — persists `{ replayId, capturedAt }` as
+  JSON to `.checkpoint.json` (gitignored), with `loadCheckpoint()` /
+  `saveCheckpoint()`.
+- `src/salesforce/pubsubClient.ts` — after each event is successfully
+  passed to `onEvent`, its replay ID is saved as the new checkpoint. On
+  startup, an existing checkpoint triggers `ReplayPreset.CUSTOM` from
+  that position; otherwise `ReplayPreset.LATEST` as before. Both paths
+  log clearly (`[checkpoint] ...`) so Developer #1 can see which mode is
+  active and why.
+- `scripts/get-topic-info.ts` — the investigation script above, kept as a
+  reusable tool.
+
+**Checkpoint semantic chosen (not deeply evaluated, just the minimal
+option):** "last event successfully passed through `onEvent`" — which in
+practice means "ServiceNow Incident successfully created," since
+`onEvent` awaits `createOnboardingIncident` and only returns once that
+succeeds. This experiment's scenario (ServiceNow always reachable) never
+actually exercised the distinction between "received" and "processed" —
+that would need combining this checkpoint logic with the FL-0012-style
+outage simulation, which wasn't done here. Flagged as still open.
+
+**Controlled experiment (steps A–E):**
+
+    A. Started subscriber fresh (no checkpoint) → "[checkpoint] none
+       found - starting with ReplayPreset.LATEST"
+    B. Published Event A ("...while online") → received, ServiceNow
+       Incident INC0010004 created, checkpoint saved.
+    C. Stopped the subscriber (confirmed via `ps aux`).
+    D. Published Event B ("...while offline") via
+       `publish-test-event.ts` — confirmed via
+       `verify-recent-incidents.ts` that no Incident existed yet for its
+       correlation ID.
+    E. Restarted the subscriber → "[checkpoint] resuming with
+       ReplayPreset.CUSTOM from replayId=..." — Event B was received and
+       processed, ServiceNow Incident INC0010005 created.
+
+**Result: yes.** A Salesforce event published while the integration
+service was offline was successfully recovered on restart, using only a
+persisted replay ID and `ReplayPreset.CUSTOM`. This directly answers this
+experiment's one question.
+
+**On duplicates (LL-0005 connection) — directly observed, not
+suppressed:** Event A was checked after the restart via
+`verify-recent-incidents.ts` and had exactly **one** Incident, not two —
+`ReplayPreset.CUSTOM` did **not** redeliver the already-checkpointed
+event in this run. No duplicate occurred. This does not close LL-0005:
+the checkpoint is written *after* `onEvent` succeeds, so a crash between
+"Incident created" and "checkpoint persisted" remains an untested gap
+where a duplicate would very plausibly still occur. See FL-0014 and the
+new LL-0008 for the precise, narrower follow-up question this leaves
+open.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

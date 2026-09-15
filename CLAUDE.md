@@ -47,18 +47,33 @@ process **silently loses** every event published while it's down, not
 merely delays them. See `docs/devex/observations.md` (OB-0007) for how
 these were tested.
 
-**A second Phase 2 Observation Review (LL-0005–LL-0007) has since analyzed
-that finding** — duplicate delivery, failure isolation, Salesforce's
+**A second Phase 2 Observation Review (LL-0005–LL-0007) then analyzed that
+finding** — duplicate delivery, failure isolation, Salesforce's
 replay/checkpoint behavior, retry, and recoverability, each with observed
 facts kept explicitly separate from candidate solutions (no architecture
-has been chosen). It also surfaces a real connection between the two
-gaps: fixing checkpoint/replay recovery will likely *increase* how often
-duplicates are seen, so the two shouldn't be designed independently. The
-review's recommended smallest next step — capture the Pub/Sub replay
-checkpoint and directly observe whether it recovers a missed event —
-is proposed, not built. See `docs/devex/lessons-learned.md` for the full
-analysis. Not yet built: retry / dead-letter handling, idempotency, and
-tests. See `services/integration-service/README.md` for current status.
+chosen). It surfaced a real connection: fixing checkpoint/replay recovery
+would likely *increase* how often duplicates are seen, so the two
+shouldn't be designed independently. It recommended one small experiment:
+capture the Pub/Sub replay checkpoint and directly observe whether it
+recovers a missed event.
+
+**That experiment has since been run (OB-0008) — and it worked.** A
+minimal checkpoint (`src/salesforce/checkpoint.ts`, wired into
+`pubsubClient.ts`) let the subscriber recover a real Salesforce event
+published while it was offline, via `ReplayPreset.CUSTOM`. No duplicate
+occurred in that clean-shutdown test. Along the way, `GetTopic`
+(`scripts/get-topic-info.ts`) was called directly and corrected an
+earlier wrong claim in LL-0007 about a `retention_policy` field that
+doesn't actually exist (FL-0013). The experiment also surfaced a sharper,
+still-open question (LL-0008): the checkpoint is written *after*
+ServiceNow succeeds, so a crash in that narrow window remains an untested
+duplicate-delivery vector, distinct from LL-0005's double-publish
+scenario. The recommended next experiment — deliberately force a crash in
+that window and observe the result — is proposed, not built. See
+`docs/devex/lessons-learned.md` (LL-0005–LL-0008) for the full analysis.
+Not yet built: any general retry / dead-letter / idempotency solution,
+and tests. See `services/integration-service/README.md` for current
+status.
 
 A Salesforce Developer Edition org (External Client App, JWT Bearer Flow)
 and a ServiceNow Developer Instance (Client Credentials grant, dedicated

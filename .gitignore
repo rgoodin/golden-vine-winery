@@ -24,6 +24,7 @@ Thumbs.db
 node_modules/
 dist/
 npm-debug.log*
+.checkpoint.json
 
 # NOTE: add further language/tool-specific ignores (e.g. target/,
 # .terraform/) as more services/tooling are introduced.

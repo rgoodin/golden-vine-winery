@@ -490,4 +490,92 @@ ServiceNow-side failures specifically.
 
 ---
 
+### FL-0013: `GetTopic` does not expose retention/replay-window information — corrects an earlier unverified assumption
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+
+#### Observation
+
+Investigating Salesforce Pub/Sub API behavior before building the replay
+checkpoint experiment (per `docs/devex/lessons-learned.md` LL-0007's
+recommended next step), specifically to check whether `TopicInfo` exposes
+a retention policy - rather than assuming.
+
+#### Friction
+
+`docs/devex/lessons-learned.md` (LL-0007, written in the prior session)
+stated: "the proto defines a `retention_policy` on `TopicInfo` that would
+answer this via a `GetTopic` call." **This was wrong.** Re-reading
+`src/salesforce/proto/pubsub_api.proto` directly shows `TopicInfo` has
+only six fields: `topic_name`, `tenant_guid`, `can_publish`,
+`can_subscribe`, `schema_id`, `rpc_id` - no retention field exists
+anywhere in this proto. Calling the live `GetTopic` RPC
+(`scripts/get-topic-info.ts`) confirmed the live API returns exactly
+those six fields and nothing else, matching the proto exactly.
+
+#### Impact
+
+A documented "fact" in the DevEx journal was wrong for one review cycle.
+Low impact here since it was caught before anything was built on the
+assumption, but it's a direct example of why this project insists on
+verifying against the live system (see LL-0002) - including verifying
+claims already written down in its own prior documentation, not just
+claims about the target platform.
+
+#### Possible Enablement
+
+None needed as a build item. Process note: when a prior DevEx entry makes
+a specific technical claim, re-verify it before relying on it for new
+work, the same as any other assumption. `docs/devex/lessons-learned.md`
+LL-0007 has been corrected in place rather than left wrong.
+
+---
+
+### FL-0014: `ReplayPreset.CUSTOM` resumes strictly *after* the checkpointed replay ID — confirmed, not assumed
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+
+#### Observation
+
+Running the replay-checkpoint recovery experiment (`docs/devex/observations.md`
+OB-0008): checkpointed the replay ID of a successfully-processed event
+("Event A"), stopped the subscriber, published a second event ("Event B")
+while offline, then restarted with `ReplayPreset.CUSTOM` from the
+persisted checkpoint.
+
+#### Friction
+
+Not friction - a confirmation. The proto's comment on `FetchRequest`
+already stated CUSTOM replay starts "after" the given `replay_id`, but
+this was unverified in this project until now. The restart delivered
+**only** Event B - Event A (whose replay ID was the checkpoint value
+itself) was **not** redelivered. Confirmed via
+`scripts/verify-recent-incidents.ts`: exactly one ServiceNow Incident per
+correlation ID, no duplicates, in this specific run.
+
+#### Impact
+
+Positive: this is the behavior needed for the checkpoint mechanism to be
+useful at all. But it only confirms the clean-shutdown case - the
+checkpoint was written and the process exited normally *before* the
+outage window began. It does **not** confirm what happens if the process
+crashes in the narrower window between an event being successfully
+processed (ServiceNow Incident created) and its checkpoint being
+persisted to disk (`src/salesforce/checkpoint.ts`'s `saveCheckpoint`
+runs *after* `onEvent` resolves - see `src/salesforce/pubsubClient.ts`).
+In that gap, restarting would still hold the *previous* (stale)
+checkpoint, and Salesforce would very plausibly redeliver the
+already-processed event, causing exactly the kind of ServiceNow-side
+duplicate `docs/devex/lessons-learned.md` LL-0005 found by a different
+route (double-publishing). This gap was not tested and remains open.
+
+#### Possible Enablement
+
+Not decided yet. See `docs/devex/lessons-learned.md` LL-0008 for the
+recommended next experiment targeting this specific gap.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->
