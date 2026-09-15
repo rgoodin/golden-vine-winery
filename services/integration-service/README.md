@@ -135,15 +135,20 @@ and
 
 - A general retry / dead-letter / idempotency solution — root causes are
   understood, confirmed by direct experiment on both possible checkpoint
-  orderings, and **both failure modes are now reliably detectable via a
-  validated diagnostic tool** (FL-0011, FL-0012, FL-0014–FL-0017,
-  `docs/devex/lessons-learned.md` LL-0005, LL-0006, LL-0008–LL-0011), but
-  no fix has been designed or built, and no architecture has been chosen.
-  The recommended next step is giving the audit tool its own incremental
-  "last audited position" (separate from the runtime checkpoint) so
-  repeat runs don't always re-sweep from `EARLIEST` — see LL-0011's
-  "Recommended smallest Phase 3 Enablement experiment." Not the same as
-  building the fix itself, or making detection automatic.
+  orderings, and both failure modes are reliably detectable via a
+  validated diagnostic tool (FL-0011, FL-0012, FL-0014–FL-0017,
+  `docs/devex/lessons-learned.md` LL-0005, LL-0006, LL-0008–LL-0011). A
+  reliability architecture spike
+  ([`docs/architecture/0001-reliability-architecture-spike.md`](../../docs/architecture/0001-reliability-architecture-spike.md))
+  investigated four candidate fixes against every demonstrated failure
+  mode, but **no architecture has been chosen and no fix has been
+  built** - the evidence doesn't yet discriminate between the two
+  strongest candidates. The spike's own recommended next step (check what
+  ServiceNow-side uniqueness mechanisms are actually configurable with
+  this integration's privileges) is proposed, not done.
+- Giving the audit tool its own incremental "last audited position" so
+  repeat runs don't always re-sweep from `EARLIEST` (LL-0011) - proposed,
+  not built.
 - Tests
 - A narrower ServiceNow OAuth Auth Scope (currently relies on the
   dedicated user's `itil` role rather than API-level token scoping — see

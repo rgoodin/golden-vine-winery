@@ -638,4 +638,51 @@ nothing currently triggers it.
 
 ---
 
+### OB-0013: Reliability architecture spike — investigated candidates, chose none
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Category:** architecture / research
+
+With enough deliberately-produced experimental evidence in hand
+(FL-0011–FL-0017, OB-0007–OB-0012, LL-0005–LL-0011), stepped back from
+individual experiments to investigate architecture candidates for the
+business invariant "exactly one Incident per business event" - without
+implementing any of them. Full document:
+`docs/architecture/0001-reliability-architecture-spike.md`.
+
+Examined four candidates (target-side ServiceNow idempotency,
+lookup-before-create, integration-owned durable processing state, and
+Salesforce's `ManagedSubscribe`/`CommitReplay`), plus one more surfaced
+during investigation (the Pub/Sub API's `ProducerEvent.id` field), each
+against the six failure modes this project has actually reproduced or
+directly reasoned about from evidence.
+
+**Concrete new findings, not assumed:**
+- Read `pubsub_api.proto`'s `ManagedFetchRequest`/`CommitReplayRequest`
+  definitions directly: `ManagedSubscribe` is explicit open beta, needs a
+  separate `ManagedEventSubscription` Tooling API record, and
+  `CommitReplayRequest` carries *only* a replay ID - nothing about any
+  downstream side effect. Conclusion: it solves the replay/checkpoint
+  durability problem (FL-0017) and nothing about the side-effect
+  atomicity problem this project has been investigating since LL-0008.
+- Attempted to query ServiceNow's `sys_dictionary` for the
+  `correlation_id` field's constraints, using the existing dedicated
+  `itil`-role integration user - blocked: "Insufficient rights to query
+  records." A genuine platform-access finding: schema investigation
+  itself needs privileges beyond what ADR 0004 deliberately granted.
+- No prior documentation was found to be wrong this round (unlike the
+  last investigation's FL-0013 correction) - stated explicitly rather
+  than left silent.
+
+**Result:** two candidates (target-side idempotency, integration-owned
+durable state) fully cover every demonstrated failure mode on paper;
+lookup-before-create is a cheap but race-prone mitigation;
+`ManagedSubscribe` is orthogonal. No architecture was chosen - the
+evidence doesn't yet discriminate between the two strongest candidates,
+and the spike document says so rather than picking one anyway. No ADR was
+written for the same reason.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

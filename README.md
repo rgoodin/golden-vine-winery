@@ -63,13 +63,14 @@ correlation IDs, testing, CI/CD, IaC, etc.) are documented in
 ├── CLAUDE.md                     # Project charter, philosophy, phases, and constraints
 ├── README.md                     # This file
 ├── docs/
-│   ├── decisions/                # Architecture Decision Records (ADRs)
-│   ├── runbooks/                 # Platform setup checklists (Phase 3 Enablement)
-│   └── devex/                    # Developer experience journal
-│       ├── observations.md       # Raw, chronological observations
-│       ├── friction-log.md       # Friction items (Observation/Friction/Impact/Enablement)
-│       ├── decisions.md          # Lightweight, working-level decisions
-│       └── lessons-learned.md    # Synthesized patterns, classified during Phase 2 review
+│   ├── architecture/              # Architecture spikes (investigation, not yet a decision)
+│   ├── decisions/                 # Architecture Decision Records (ADRs)
+│   ├── runbooks/                  # Platform setup checklists (Phase 3 Enablement)
+│   └── devex/                     # Developer experience journal
+│       ├── observations.md        # Raw, chronological observations
+│       ├── friction-log.md        # Friction items (Observation/Friction/Impact/Enablement)
+│       ├── decisions.md           # Lightweight, working-level decisions
+│       └── lessons-learned.md     # Synthesized patterns, classified during Phase 2 review
 └── services/
     └── integration-service/      # Node.js + TypeScript: Salesforce -> ServiceNow
 ```
@@ -78,12 +79,18 @@ correlation IDs, testing, CI/CD, IaC, etc.) are documented in
 
 **Phase 1's first milestone is done: the full chain works.** A real
 Salesforce Platform Event is published, received via the Pub/Sub API, and
-used to create a real ServiceNow Incident, end-to-end. A Phase 2
-Observation Review has been completed, and both Phase 3 Enablement
-candidates it identified have been built (see
-[`docs/devex/lessons-learned.md`](./docs/devex/lessons-learned.md)).
+used to create a real ServiceNow Incident, end-to-end. Two rounds of
+Observation Review and a chain of deliberate reliability experiments
+followed, establishing exactly what does and doesn't hold up under
+failure (duplicate delivery, crash recovery, silent loss, and whether
+either is detectable after the fact) - culminating in an architecture
+spike investigating how to guarantee "exactly one Incident per business
+event." No architecture has been chosen yet; the evidence doesn't yet
+discriminate between the two strongest candidates.
 
 See [`CLAUDE.md`](./CLAUDE.md) ("Current Repository State") for the
-up-to-date detail, and
+up-to-date summary,
+[`docs/architecture/0001-reliability-architecture-spike.md`](./docs/architecture/0001-reliability-architecture-spike.md)
+for the full spike, and
 [`services/integration-service/README.md`](./services/integration-service/README.md)
 for how to run it.

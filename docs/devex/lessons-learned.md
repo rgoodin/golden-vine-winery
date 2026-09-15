@@ -577,6 +577,12 @@ deferred until the underlying fix architecture is chosen. `ManagedSubscribe`'s
 `CommitReplayRequest`/`Response` flow also remains noted, larger, and
 deferred.
 
+**Deliberately deferred 2026-09-15:** explicitly kept as a recorded
+candidate rather than built, so the project could move to the reliability
+architecture spike (`docs/decisions/0005-reliability-architecture-spike.md`)
+instead. The audit tool (`scripts/detect-unprocessed-events.ts`) remains
+unchanged from OB-0012's validated state.
+
 ---
 
 <!-- Add new entries above this line, most recent first. -->

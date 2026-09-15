@@ -50,15 +50,29 @@ Phase 3 experiments** — full history in `docs/devex/lessons-learned.md`
   complete 11-event history with **zero discrepancies** from the
   independently-predicted result (OB-0012, LL-0011).
 
-No architecture has been chosen for the underlying duplicate/silent-loss
-problem, and the detector remains an on-demand experimental/audit
-instrument, not promoted into any runtime path. The recommended next
-step — give the audit tool its own incremental "last audited position,"
-separate from the runtime checkpoint, so repeat runs don't always
-re-sweep from `EARLIEST` — is proposed, not built. Not yet built: any
-general retry/dead-letter/idempotency solution, an automatic (rather
-than on-demand) detection trigger, and tests. See
-`services/integration-service/README.md` for current status.
+**With that evidence in hand, a reliability architecture spike investigated
+(not chose) how to guarantee "exactly one Incident per business event"**
+— see `docs/architecture/0001-reliability-architecture-spike.md` and
+`docs/devex/observations.md` OB-0013. Examined target-side ServiceNow
+idempotency, lookup-before-create, integration-owned durable processing
+state, and Salesforce's `ManagedSubscribe`/`CommitReplay` (read directly
+from the proto: it's explicit open beta and only ever addresses the
+replay/checkpoint problem, never the side-effect atomicity one) against
+every failure mode reproduced so far. Two candidates fully cover the
+demonstrated failures on paper; the evidence doesn't yet discriminate
+between them (one needs ServiceNow admin privileges this project's
+deliberately least-privileged integration user doesn't have and couldn't
+even use to check `sys_dictionary`). No architecture was chosen, no ADR
+was written — the spike's own recommended next step (get a human with
+ServiceNow admin access to check what uniqueness mechanisms are actually
+configurable) is proposed, not done.
+
+Also proposed but deliberately not built: giving the audit tool its own
+incremental "last audited position" so repeat runs don't always re-sweep
+from `EARLIEST` (LL-0011). Not yet built: any general retry/dead-letter/
+idempotency solution, an automatic (rather than on-demand) detection
+trigger, and tests. See `services/integration-service/README.md` for
+current status.
 
 A Salesforce Developer Edition org (External Client App, JWT Bearer Flow)
 and a ServiceNow Developer Instance (Client Credentials grant, dedicated
