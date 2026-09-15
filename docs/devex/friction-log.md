@@ -675,4 +675,62 @@ orderings and the recommended next investigation.
 
 ---
 
+### FL-0017: Silent losses ARE detectable after the fact — but the current checkpoint mechanism retains no history to anchor a targeted search
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+
+#### Observation
+
+Investigating LL-0009's recommended question: can this system detect,
+after the fact, that a replay checkpoint skipped an event that was never
+acted on? Built a read-only diagnostic (`replayRange` in
+`pubsubClient.ts`, `scripts/detect-unprocessed-events.ts`) rather than
+assuming an answer either way.
+
+#### Friction
+
+Two distinct findings, one encouraging and one limiting:
+
+1. **Detection works.** Replaying from a known-old position (Event D's
+   checkpoint, on record from the prior experiment) with
+   `ReplayPreset.CUSTOM` retrieved Event E's full data, including its
+   `correlationId` - and cross-referencing that against ServiceNow
+   correctly flagged it as a gap (no matching Incident), matching the
+   independently-confirmed silent loss exactly.
+2. **But the running system can't do this on its own.** `checkpoint.ts`
+   uses `writeFileSync` to fully overwrite `.checkpoint.json` on every
+   save - there is no history. The value on disk right now is Event E's
+   own (post-loss) position; Event D's position, needed to anchor the
+   search above, only existed because it happened to be recorded in this
+   project's own conversation history, not because the codebase retained
+   it anywhere.
+3. **A history-free fallback exists and was confirmed viable:**
+   `ReplayPreset.EARLIEST` returned all 11 events ever published to this
+   topic across this entire project's testing - not just a recent
+   window. A full reconciliation sweep from `EARLIEST`, cross-referenced
+   against ServiceNow, correctly classified every one of those 11 events
+   (see `docs/devex/observations.md` OB-0011 for the full list),
+   including a genuine gap unrelated to LL-0009's specific bug: an event
+   published before the ServiceNow adapter existed at all (predating
+   `incidentAdapter.ts`), which has no Incident for an entirely different
+   and unsurprising reason. No false positives or negatives found when
+   cross-checked against known history.
+
+#### Impact
+
+Detection is real and practical today, via a manual/on-demand
+investigation, not an automated safeguard. Without either retained
+checkpoint history or a periodic `EARLIEST` sweep, a silent loss in
+production would still go unnoticed indefinitely - the capability to
+find it exists, but nothing currently triggers it.
+
+#### Possible Enablement
+
+Not decided, and deliberately not built as an automated mechanism. See
+`docs/devex/lessons-learned.md` LL-0010 for the finding and the
+recommended next step.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

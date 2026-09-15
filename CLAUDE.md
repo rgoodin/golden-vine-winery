@@ -50,13 +50,25 @@ both checkpoint orderings' failure modes (LL-0009):**
 
 Neither is simply "safer" — each fully prevents the other's failure mode
 while fully exhibiting its own, and the silent-loss mode is markedly
-harder to detect (no business-identifiable log trail at all). No
-architecture has been chosen. The recommended next step — investigate
-whether this system can detect, after the fact, that a replay checkpoint
-skipped an event that was never acted on, before picking a fix — is
-proposed, not built. See `docs/devex/lessons-learned.md` LL-0008–LL-0009
-for the full comparison and reasoning. Not yet built: any general retry /
-dead-letter / idempotency solution, and tests. See
+harder to detect (no business-identifiable log trail at all).
+
+**Whether a silent loss can be detected after the fact has since been
+investigated too (LL-0010, OB-0011, FL-0017) — yes, confirmed two
+ways.** `replayRange()` in `pubsubClient.ts` can replay from either a
+known-old position or `ReplayPreset.EARLIEST` (a full sweep, confirmed to
+return this project's entire 11-event test history). Cross-referencing
+against ServiceNow (`npm run detect-unprocessed-events`) correctly
+classified every event with zero false positives/negatives. Two real
+limits found: (1) targeted replay needs an anchor `checkpoint.ts` doesn't
+retain (single overwritten value, no history), and (2) this detection
+method finds absence (silent loss) but not multiplicity (duplicates) -
+it reported known duplicate events as `OK` since at least one Incident
+existed. No architecture has been chosen. The recommended next step —
+extend the detector to also count duplicates, unifying detection of both
+confirmed failure modes in one tool — is proposed, not built. See
+`docs/devex/lessons-learned.md` LL-0008–LL-0010 for the full history. Not
+yet built: any general retry / dead-letter / idempotency solution, an
+automatic (rather than on-demand) detection trigger, and tests. See
 `services/integration-service/README.md` for current status.
 
 A Salesforce Developer Edition org (External Client App, JWT Bearer Flow)

@@ -473,4 +473,97 @@ correlation at the time it happened.
 
 ---
 
+### OB-0011: Investigated silent-loss detectability — confirmed via two independent methods
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Category:** observability / testing / recoverability
+
+Investigated LL-0009's recommended question directly: can a silent loss
+be detected after the fact? No idempotency, retries, dedup, or
+`ManagedSubscribe` were built - this was read-only investigation.
+
+**Code added:**
+- `replayRange()` in `src/salesforce/pubsubClient.ts` - a read-only
+  diagnostic that replays events from either a specific base64 replay ID
+  (`ReplayPreset.CUSTOM`) or the literal `'EARLIEST'`
+  (`ReplayPreset.EARLIEST`, a full sweep), collecting whatever arrives in
+  a time window. Touches no runtime state - doesn't import `checkpoint.ts`
+  at all, and never calls ServiceNow's write API.
+- `scripts/detect-unprocessed-events.ts` - cross-references each replayed
+  event's `Correlation_Id__c` against ServiceNow via a read-only query,
+  reporting `OK` or `GAP DETECTED` per event.
+- A small refactor: extracted `createSchemaResolver()` out of `subscribe()`
+  so both it and `replayRange()` share the same Avro schema-caching logic
+  without duplication.
+
+**Method 1 - targeted replay from a known anchor:**
+Ran `npm run detect-unprocessed-events -- AAAAAAAXT5wAE04tY29yZTEuc2ZkYy04dGd0dDU=`
+(Event D's checkpoint, on record from the prior experiment - see OB-0010).
+Result: retrieved exactly one event, Event E, with its real
+`correlationId` intact, and correctly flagged it `GAP DETECTED` after
+querying ServiceNow and finding nothing. The returned `replayId` matched
+byte-for-byte the value independently known to be Event E's (from
+OB-0010's own checkpoint-file evidence).
+
+**A limitation surfaced immediately:** this method requires already
+knowing a replay position from *before* the suspected loss.
+`.checkpoint.json` only ever holds the single latest value (confirmed by
+reading `checkpoint.ts`: `writeFileSync` fully overwrites, no append/log)
+- and that latest value, right now, *is* Event E's own (post-loss)
+position. The only reason Event D's position was available at all is
+that it happened to be recorded in this project's own conversation
+history, not because the running system retains it. See FL-0017.
+
+**Method 2 - full sweep from EARLIEST, no prior knowledge required:**
+Tested whether `ReplayPreset.EARLIEST` is viable at all (a throwaway
+script, deleted after use) before committing to it - it returned **all
+11 events** ever published to this topic across this project's entire
+testing history, not just a recent window. Ran
+`npm run detect-unprocessed-events` (defaults to `EARLIEST`) and got a
+complete, correctly-classified account of every event:
+
+    SKIPPED      - "Acme Distribution Co" (no Correlation_Id__c - predates
+                    the full canonical schema, OB-0004's original milestone
+                    test, handled gracefully rather than crashing)
+    GAP DETECTED - "Golden Gate Distributors" (predates the ServiceNow
+                    adapter existing at all - OB-0005's schema-expansion
+                    test, before incidentAdapter.ts was ever wired in -
+                    independently re-confirmed via verify-recent-incidents.ts;
+                    a real gap, but NOT the LL-0009 bug)
+    OK           - "Sonoma Valley Distributors" (INC0010001, OB-0006's
+                    first full-chain milestone)
+    OK   (x2)    - "Duplicate Test Co" (FL-0011's deliberate double-publish
+                    - both Incidents exist, so both show OK; this method
+                    detects absence, not over-counting - see below)
+    GAP DETECTED - "Outage Test Co" (FL-0012's simulated ServiceNow outage
+                    - the process crashed before ever calling ServiceNow)
+    OK           - Events A, B (OB-0008's recovery experiment)
+    OK           - Event C (OB-0009's baseline)
+    OK           - Event D (OB-0009's crash target - FL-0015's confirmed
+                    duplicate; again shown OK since at least one Incident
+                    exists)
+    GAP DETECTED - Event E (OB-0010's silent-loss target - the specific
+                    case this investigation set out to confirm)
+
+Every classification was consistent with what this project's history
+already independently established; two were spot-checked again via a
+fresh `verify-recent-incidents.ts` call and matched.
+
+**Result: yes, confirmed by two independent methods.** A silent loss can
+be detected after the fact. The full-sweep method is the more practically
+useful of the two, since it needs no stored anchor at all - but it's also
+not automatic: nothing in this codebase currently triggers it, so
+detection today means a human deciding to run it.
+
+**A stated limitation, not a gap in this investigation:** this method
+finds correlation IDs with **zero** matching Incidents (silent loss). It
+does **not** find correlation IDs with **more than one** (LL-0005's
+duplicate problem) - both "Duplicate Test Co" and Event D show `OK`
+despite each genuinely having two Incidents, because the query only
+checks existence. A single unified reconciliation tool covering both
+known failure modes would need to count, not just check presence.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

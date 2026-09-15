@@ -450,61 +450,90 @@ to be no more or less *frequent*. A durable fix likely needs either (a)
 a genuine correctness mechanism (idempotency and/or a server-side commit
 protocol, not just checkpoint reordering), or (b) at minimum, a way to
 detect when the silent-loss failure mode has occurred after the fact.
-(b) is smaller and orthogonal to picking an architecture — see the
-recommendation below.
+(b) is smaller and orthogonal to picking an architecture — see LL-0010.
+
+---
+
+### LL-0010: A silent loss can be detected after the fact by two independent methods — detection is real, but not automatic
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Evidence:** FL-0017, OB-0011
+
+**Lesson:** LL-0009's open question - can a silent loss be found after
+the fact - is resolved: yes, confirmed two ways.
+`src/salesforce/pubsubClient.ts`'s new `replayRange()` can replay either
+from a specific known-old position (`ReplayPreset.CUSTOM`) or from
+`ReplayPreset.EARLIEST` (a full sweep). Both were tested against the real
+org: the targeted replay retrieved Event E's exact data using Event D's
+checkpoint as an anchor; the full sweep independently retrieved **all 11
+events** ever published in this project's testing and, cross-referenced
+against ServiceNow, correctly classified every single one - including a
+gap unrelated to LL-0009 entirely (an event that predates the ServiceNow
+adapter's existence), with zero false positives or negatives against
+known history.
+
+Two limits found along the way, both real and worth keeping in mind
+rather than treated as solved:
+
+- **Detection needs *something* to anchor or bound it.** Targeted replay
+  needs a known-old position, and `checkpoint.ts` currently retains none
+  (`writeFileSync` overwrites, no history) - the only reason Event D's
+  position was usable here is that it was recorded in conversation
+  history, not by the running system. `EARLIEST` sidesteps this but
+  scales with retention and event volume, neither of which is bounded or
+  known (FL-0013 already established `GetTopic` doesn't expose
+  retention).
+- **This method finds absence, not multiplicity.** It correctly flagged
+  Event E (zero Incidents) but reported both "Duplicate Test Co" and
+  Event D as `OK`, despite each genuinely having two Incidents (LL-0005,
+  LL-0008's confirmed duplicates) - because the underlying query only
+  checks existence. Detecting *that* failure mode the same way would need
+  counting, not existence-checking.
+
+**Implication:** Detection is now a real, working, on-demand capability
+(`npm run detect-unprocessed-events`), not a hypothesis. It is not,
+however, automatic - nothing in this codebase currently triggers a sweep
+on any schedule or event; today it requires a human to decide to run it.
+That gap between "can detect" and "does detect" is itself the next thing
+worth being deliberate about, rather than assuming a manual tool is
+sufficient going forward.
 
 ---
 
 ## Recommended smallest Phase 3 Enablement experiment (not started)
 
-The prior recommendation in this section (test the opposite checkpoint
-ordering and observe its failure mode) has been **completed** — see
-OB-0010, FL-0016. Combined with OB-0009/FL-0015, both orderings' failure
-modes are now directly confirmed and compared (LL-0009). This section
-recommends the next step based on that combined evidence, without
-selecting an architecture.
+The prior recommendation (investigate whether silent-loss detection is
+possible) has been **completed** — see OB-0011, FL-0017, LL-0010: yes,
+confirmed two ways. This section recommends the next step based on that
+result, without selecting an architecture.
 
-The comparison's clearest finding is about *detectability*, not just
-occurrence: ordering A's duplicate was trivial to find (query ServiceNow
-by correlation ID); ordering B's silent loss was only detectable in this
-experiment because the correlation ID was already known in advance from
-publishing the test event. In a real, non-experimental occurrence,
-nothing in this system would notice. So the single highest-value,
-smallest next investigation is: **can this system detect, after the
-fact, that a Pub/Sub replay checkpoint has advanced past an event that
-was never demonstrably acted on — without assuming a fix for either
-failure mode first?**
+Two real gaps remain in what was just built, and the smaller one is the
+better next step:
 
-Concretely (described here, not implemented — out of scope for this
-round):
+**Recommended: extend the existing detector to also catch duplicates
+(count > 1), not just silent loss (count = 0), turning it into one
+reconciliation tool that covers both directly-confirmed failure modes
+(LL-0005/LL-0008's duplicates and LL-0008/LL-0009's silent loss) with the
+same mechanism.** Concretely (described, not implemented): change
+`detect-unprocessed-events.ts`'s ServiceNow query from "does at least one
+Incident exist" to "how many Incidents exist," and report three states
+per correlation ID instead of two (`OK` / `GAP` / `DUPLICATE (n)`). This
+is a small, mechanical change to code that already exists and already
+works, and it directly closes the "finds absence, not multiplicity"
+limitation LL-0010 just found - rather than guessing whether it matters,
+now there's already a mechanism to point at both known problems and see
+their true combined extent in one pass.
 
-1. Investigate what the Pub/Sub API actually offers for listing or
-   counting events in a known replay range (e.g. subscribing with
-   `ReplayPreset.CUSTOM` from an *old* checkpoint for a bounded window,
-   the way `GetTopic` was investigated in OB-0008, rather than assuming
-   a capability exists).
-2. If such a capability exists, the smallest experiment would replay a
-   known range spanning a deliberately-induced silent-loss gap (using
-   the same `EXPERIMENT_CHECKPOINT_BEFORE_SERVICENOW` mechanism already
-   built) and see whether the "lost" event can be identified as present
-   in Salesforce's history but absent from ServiceNow — i.e., gap
-   detection via cross-referencing, not prevention.
-3. Record whatever is found, including a negative result (if no such
-   detection is practically possible with the current architecture, that
-   itself is significant: it would mean prevention, not detection, is
-   the only viable path, which *would* start to narrow the eventual
-   architectural choice - but still isn't one).
-
-Why this over choosing and implementing a fix directly (idempotency,
-retries, `ManagedSubscribe`, or picking one checkpoint ordering as
-"good enough"): LL-0009 shows the two orderings tested so far are a
-trade-off, not a solution, and the detectability gap is the one
-dimension neither individual experiment measured. Investigating whether
-detection is even possible is smaller than building either a full
-correctness mechanism or a monitoring system, and its result directly
-shapes which architecture is worth pursuing - rather than guessing.
-`ManagedSubscribe`'s `CommitReplayRequest`/`Response` flow (noted in the
-prior round) remains a larger, deferred investigation, not this one.
+**Noted but not recommended yet, as a larger step:** turning the sweep
+from an on-demand script into something that runs automatically (on a
+schedule, or triggered by process restart) would close the "not
+automatic" gap LL-0010 named - but that's a step toward building a real
+mechanism/architecture, which per this investigation's own instructions
+(and the project's Developer #1 principle) shouldn't be chosen yet
+without first knowing the combined true extent of both failure modes.
+`ManagedSubscribe`'s `CommitReplayRequest`/`Response` flow also remains
+noted, larger, and deferred.
 
 ---
 

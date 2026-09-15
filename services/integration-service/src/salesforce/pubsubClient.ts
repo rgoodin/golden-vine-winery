@@ -27,6 +27,27 @@ export interface DecodedPubSubEvent {
   replayId: Buffer;
 }
 
+function createSchemaResolver(client: any) {
+  const schemaCache = new Map<string, avro.Type>();
+  return function getSchema(schemaId: string): Promise<avro.Type> {
+    const cached = schemaCache.get(schemaId);
+    if (cached) {
+      return Promise.resolve(cached);
+    }
+    return new Promise((resolve, reject) => {
+      client.GetSchema({ schemaId }, (err: grpc.ServiceError | null, response: any) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        const type = avro.Type.forSchema(JSON.parse(response.schemaJson));
+        schemaCache.set(schemaId, type);
+        resolve(type);
+      });
+    });
+  };
+}
+
 async function createClient() {
   const { accessToken, instanceUrl } = await authenticate();
   const tenantId = accessToken.split('!')[0];
@@ -93,26 +114,7 @@ export async function subscribe(
   onEvent: (event: DecodedPubSubEvent) => void | Promise<void>
 ): Promise<void> {
   const client = await createClient();
-
-  const schemaCache = new Map<string, avro.Type>();
-
-  function getSchema(schemaId: string): Promise<avro.Type> {
-    const cached = schemaCache.get(schemaId);
-    if (cached) {
-      return Promise.resolve(cached);
-    }
-    return new Promise((resolve, reject) => {
-      client.GetSchema({ schemaId }, (err: grpc.ServiceError | null, response: any) => {
-        if (err) {
-          reject(err);
-          return;
-        }
-        const type = avro.Type.forSchema(JSON.parse(response.schemaJson));
-        schemaCache.set(schemaId, type);
-        resolve(type);
-      });
-    });
-  }
+  const getSchema = createSchemaResolver(client);
 
   const stream = client.Subscribe();
 
@@ -195,4 +197,80 @@ export async function subscribe(
       numRequested: 10,
     });
   }
+}
+
+/**
+ * Read-only diagnostic: replays events from `from` and returns whatever
+ * arrives within `windowMs`, without invoking any business logic and
+ * without touching the runtime checkpoint file (checkpoint.ts is not
+ * imported by this function). Used to investigate whether an event
+ * "skipped" by a checkpoint can still be retrieved from Salesforce after
+ * the fact - see docs/devex/lessons-learned.md LL-0009's recommended
+ * investigation and scripts/detect-unprocessed-events.ts.
+ *
+ * `from` is either a base64 replay ID (resumes with `ReplayPreset.CUSTOM`
+ * - requires already knowing a position before the suspected gap) or the
+ * literal string `'EARLIEST'` (a full sweep of everything Salesforce has
+ * retained for this topic, needing no prior knowledge at all - confirmed
+ * viable in this org: it returned all 11 events published across this
+ * project's testing so far, not just a recent few).
+ *
+ * This does not, by itself, detect anything - it only answers "can the
+ * data still be fetched." Cross-referencing against ServiceNow is the
+ * caller's job (see the script).
+ */
+export async function replayRange(
+  topicName: string,
+  from: string | 'EARLIEST',
+  windowMs = 8000
+): Promise<DecodedPubSubEvent[]> {
+  const client = await createClient();
+  const getSchema = createSchemaResolver(client);
+  const collected: DecodedPubSubEvent[] = [];
+
+  const stream = client.Subscribe();
+
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      try {
+        stream.cancel();
+      } catch {
+        // stream may already be closed; nothing to do
+      }
+      resolve(collected);
+    };
+
+    const timer = setTimeout(finish, windowMs);
+
+    stream.on('data', async (fetchResponse: any) => {
+      for (const consumerEvent of fetchResponse.events ?? []) {
+        const schemaId = consumerEvent.event.schemaId as string;
+        const avroType = await getSchema(schemaId);
+        const payload = avroType.fromBuffer(consumerEvent.event.payload as Buffer);
+        collected.push({
+          schemaId,
+          payload: payload as Record<string, unknown>,
+          replayId: consumerEvent.replayId as Buffer,
+        });
+      }
+    });
+
+    stream.on('error', () => finish());
+
+    if (from === 'EARLIEST') {
+      stream.write({
+        topicName,
+        replayPreset: 'EARLIEST',
+        numRequested: 50,
+      });
+    } else {
+      stream.write({
+        topicName,
+        replayPreset: 'CUSTOM',
+        replayId: Buffer.from(from, 'base64'),
+        numRequested: 50,
+      });
+    }
+  });
 }
