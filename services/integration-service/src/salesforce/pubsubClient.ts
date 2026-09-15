@@ -129,6 +129,21 @@ export async function subscribe(
         replayId,
       });
 
+      // Experimental, deterministic crash point (Phase 3 Enablement,
+      // LL-0008): when set, terminates the process immediately after
+      // onEvent has succeeded (i.e. after ServiceNow has already created
+      // the Incident) but before the checkpoint below is persisted - to
+      // directly test whether that specific gap causes a duplicate on
+      // restart. Never set outside that one experiment. Does not change
+      // normal checkpoint semantics in any other case.
+      if (process.env.EXPERIMENT_CRASH_BEFORE_CHECKPOINT === 'true') {
+        console.log(
+          '[experiment] EXPERIMENT_CRASH_BEFORE_CHECKPOINT set - exiting now, ' +
+            'after onEvent succeeded but before saveCheckpoint() runs.'
+        );
+        process.exit(1);
+      }
+
       saveCheckpoint(replayId);
       console.log(
         `[checkpoint] saved replayId=${replayId.toString('base64')} at ${new Date().toISOString()}`

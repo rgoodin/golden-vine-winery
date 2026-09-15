@@ -295,4 +295,85 @@ open.
 
 ---
 
+### OB-0009: Crash-window experiment — confirmed a real duplicate ServiceNow Incident
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Category:** error handling / testing / recoverability
+
+Ran the experiment LL-0008 recommended: does a crash between ServiceNow
+successfully creating an Incident and the Salesforce replay checkpoint
+being persisted cause that event to be redelivered and reprocessed into
+a duplicate Incident on restart? Scope was deliberately narrow — no
+idempotency, deduplication, correlation-ID lookup, or retry logic was
+added; the only change was a single deterministic test mechanism.
+
+**Mechanism added:** an env-var-gated crash point in
+`src/salesforce/pubsubClient.ts` — `EXPERIMENT_CRASH_BEFORE_CHECKPOINT=true`
+calls `process.exit(1)` immediately after `onEvent` resolves
+successfully and before `saveCheckpoint()` runs. Off by default; changes
+no normal-path behavior. Deterministic (not timing/race-based), so the
+exact boundary is hit every time it's enabled.
+
+**Controlled experiment (steps A–H), with independent evidence captured
+at each boundary rather than trusting any single log source:**
+
+    A. Established a known checkpoint: ran the subscriber normally, let
+       it process a baseline event ("Event C"), confirmed both the
+       ServiceNow Incident (INC0010006) and the resulting checkpoint
+       file contents (replayId ending ...dHR0dDU=, i.e. Event C's).
+    B. Stopped the subscriber, restarted it WITH the crash flag set
+       (resumed correctly from Event C's checkpoint - unaffected by the
+       flag), then published Event D ("...crash target").
+    C. Event D was received and processed; ServiceNow confirmed Incident
+       creation (INC0010007) - visible in the subscriber's own log.
+    D. The deterministic crash fired immediately after, before
+       `saveCheckpoint()` ran - confirmed by the absence of a
+       "[checkpoint] saved..." log line, and confirmed independently by
+       `ps aux` showing no process, and by reading `.checkpoint.json`
+       directly: still byte-for-byte Event C's value, not Event D's.
+    E. Independently verified via `verify-recent-incidents.ts` (a
+       ServiceNow query, not our own log) that exactly one Incident
+       (INC0010007) existed for Event D's correlation ID at this point.
+    F. Restarted the subscriber normally (crash flag unset this time).
+       It resumed with `ReplayPreset.CUSTOM` from the stale, Event-C
+       checkpoint, as expected given step D's finding.
+    G. Salesforce redelivered Event D - confirmed by the subscriber
+       logging "Received DistributorOnboardingRequested event" a second
+       time with the identical `eventId`/`correlationId` as before.
+    H. The redelivered event was processed normally (no crash flag) and
+       created a **second** ServiceNow Incident, INC0010008. Confirmed
+       independently: `verify-recent-incidents.ts` showed **two**
+       Incidents (INC0010007, INC0010008) for the one correlation ID.
+
+**Result: yes, duplicate processing occurs.** This confirms LL-0008's
+inference with direct, reproducible evidence rather than leaving it as a
+code-reading guess. The duplicate was not suppressed, worked around, or
+fixed - per the experiment's explicit scope, it was only observed and
+recorded.
+
+**Distinguishing the four things the experiment was designed to keep
+separate:**
+- *Salesforce redelivery*: confirmed by the identical `eventId` appearing
+  in two separate "Received" log lines, on two separate process runs.
+- *Integration-service processing*: confirmed by two separate "Created
+  ServiceNow Incident" log lines, each following a full,
+  independent trip through `toCanonicalEvent` → `createOnboardingIncident`.
+- *ServiceNow side effects*: confirmed independently of our own logs, via
+  a live ServiceNow query showing two Incident records.
+- *Checkpoint state*: confirmed by reading `.checkpoint.json` directly at
+  three points - unchanged after the crash, then advanced only after the
+  second (successful, non-crashed) run completed.
+
+**On the "last received" vs. "last successfully processed" semantic
+question (deliberately left open in OB-0008):** this experiment didn't
+resolve it either, but it does make the trade-off concrete for the first
+time: checkpointing *after* ServiceNow succeeds (today's behavior)
+produces exactly the duplicate seen here. The natural next question -
+what happens if the checkpoint is written *before* calling ServiceNow
+instead - was not tested. See `docs/devex/lessons-learned.md` LL-0008
+for the recommendation.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

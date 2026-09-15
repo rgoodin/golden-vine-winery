@@ -387,6 +387,20 @@ of after would close the crash-duplication gap but reopen a
 "checkpoint says done, but it wasn't" risk on ServiceNow failure — the
 same trade-off LL-0006 already named for error handling generally.
 
+**Resolved 2026-09-15 (Phase 3 experiment, OB-0009, FL-0015):** Directly
+confirmed with a deterministic test. Added a single env-var-gated crash
+point (`EXPERIMENT_CRASH_BEFORE_CHECKPOINT`) between `onEvent` succeeding
+and `saveCheckpoint()` running - no idempotency, dedup, retry, or
+correlation-ID lookup was added. Result: Salesforce redelivered the
+event after restart, and the integration service created a **second**
+ServiceNow Incident for the identical `correlationId`
+(`INC0010007` and `INC0010008`), independently confirmed via
+`verify-recent-incidents.ts` rather than the service's own logs alone.
+The inference above was correct. What remains open: whether writing the
+checkpoint *before* calling ServiceNow instead would avoid this without
+introducing a worse silent-loss failure mode - not tested, see the
+recommendation below.
+
 ---
 
 **A connection worth naming explicitly, across LL-0005, LL-0007, and
@@ -396,48 +410,66 @@ solve on separate schedules. LL-0007's experiment showed checkpointing
 is a real, positive result — but LL-0008 shows the general
 "at-least-once" concern raised when LL-0007 was first written wasn't
 wrong, just imprecise: the risk isn't checkpoint resume *in general*, it's
-specifically the gap between processing and persisting the checkpoint.
-Whichever gets addressed first (idempotency per LL-0005, or checkpoint
-timing per LL-0008) should be designed with the other in mind.
+specifically the gap between processing and persisting the checkpoint —
+and that gap is now confirmed to actually produce duplicates in practice,
+not just in theory.
 
 ## Recommended smallest Phase 3 Enablement experiment (not started)
 
-The prior recommendation in this section (capture and use the replay
-checkpoint; observe recovery and redelivery) has been **completed** — see
-OB-0008. This section now recommends the next one.
+The prior recommendation in this section (deliberately crash inside the
+processing/checkpoint gap and observe whether it causes a duplicate) has
+been **completed** — see OB-0009, FL-0015. It did: two ServiceNow
+Incidents for one event. This section now recommends the next one, based
+solely on what that experiment showed.
 
-Per LL-0008, the single highest-value, smallest next experiment is:
-**deliberately crash the subscriber inside the gap between an event being
-processed and its checkpoint being persisted, and directly observe
-whether restarting causes that event to be redelivered and reprocessed
-into a duplicate ServiceNow Incident.**
+The experiment confirmed the cost of today's ordering (checkpoint written
+*after* calling ServiceNow: duplicates on a crash in that gap). It did
+**not** test the alternative ordering's cost. So the single highest-value,
+smallest next experiment is: **write the checkpoint *before* calling
+ServiceNow instead of after, then re-run an equivalent crash experiment
+timed at the new boundary, and observe what failure mode that trades the
+current one for.**
 
 Concretely (described here, not implemented — out of scope for this
 review):
 
-1. Temporarily introduce a way to force an exit between `onEvent`
-   resolving and `saveCheckpoint` being called in `pubsubClient.ts` —
-   e.g. a one-shot env-var-gated `process.exit()` right after `onEvent`
-   returns, so the checkpoint file is deliberately left stale. (Throwaway
-   for the experiment, not a permanent feature.)
-2. Run the experiment: publish an event, let it process and hit the
-   forced exit (checkpoint stays at its *previous* value), restart, and
-   watch — via `verify-recent-incidents.ts` — whether that event now has
-   one Incident or two.
-3. Record the result plainly either way: if a duplicate occurs, that
-   confirms LL-0008's inference with direct evidence and makes the
-   idempotency-vs-checkpoint-ordering trade-off concrete rather than
-   theoretical. If no duplicate occurs, that's equally worth recording —
-   it would mean something about Salesforce's or our own handling is more
-   forgiving than the code reading suggested, which would itself need
-   explaining before being trusted.
+1. In `pubsubClient.ts`, move `saveCheckpoint(replayId)` to run
+   immediately after an event is received/decoded, *before* `onEvent`
+   (and therefore before `createOnboardingIncident`) is called.
+2. Add an equivalent deterministic crash point, timed to fire *during* or
+   immediately after the ServiceNow call but before it's known to have
+   succeeded — e.g. gated the same way as
+   `EXPERIMENT_CRASH_BEFORE_CHECKPOINT`, but placed inside or right after
+   the `fetch` in `src/servicenow/incidentAdapter.ts`.
+3. Run the same shape of experiment: publish an event, force the crash
+   right as/after ServiceNow is called, restart, and observe — via
+   `verify-recent-incidents.ts` and the subscriber's own logs — whether
+   the event is redelivered (it shouldn't be, since the checkpoint now
+   precedes the ServiceNow call) and, critically, whether an Incident
+   was actually created for it or not. The concrete question this
+   answers: does "checkpoint-first" trade the observed duplicate-Incident
+   failure mode for a *silent-loss* one (checkpoint says handled, but no
+   Incident exists), or does it turn out to be strictly better in
+   practice?
+4. Record the result plainly either way, the same as this round: a
+   silent loss is arguably worse than a duplicate (a duplicate is at
+   least visible and mergeable; a silently-dropped onboarding event may
+   not be noticed until a business process downstream fails to happen),
+   so this experiment could easily argue *against* switching the
+   ordering — that's a legitimate, evidence-based outcome, not a failed
+   experiment.
 
 Why this over building idempotency or a full retry/dead-letter system
-directly (LL-0005's and LL-0006's candidates): it's the one remaining
-untested assumption underpinning both, and it's cheap to force (a single
-deliberate exit point, no new persistent infrastructure). Its result
-determines whether idempotency work is urgent-and-required or a
-nice-to-have, rather than guessing.
+directly (LL-0005's and LL-0006's candidates): both checkpoint orderings
+have now been reasoned about, but only one has been directly tested. This
+experiment completes the comparison with the same rigor already applied
+to the first ordering, before any fix is chosen. It's also worth noting,
+without pursuing it now: the Pub/Sub API's proto defines a separate
+`ManagedSubscribe` RPC with explicit `CommitReplayRequest`/`Response`
+messages - a server-side, application-controlled commit mechanism that
+might make this whole local-file checkpoint approach unnecessary. That's
+a larger investigation than "smallest," so it's noted here for future
+reference rather than recommended now.
 
 ---
 

@@ -578,4 +578,51 @@ recommended next experiment targeting this specific gap.
 
 ---
 
+### FL-0015: Confirmed — a crash between ServiceNow success and checkpoint persistence causes a real duplicate Incident
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+
+#### Observation
+
+Directly tested FL-0014/LL-0008's open question with a deterministic
+experiment (`docs/devex/observations.md` OB-0009): added a single
+env-var-gated crash point in `src/salesforce/pubsubClient.ts`, right
+after `onEvent` succeeds (ServiceNow Incident created) and before
+`saveCheckpoint()` runs. Published an event, let it process and hit the
+forced exit, restarted from the now-stale checkpoint, and watched what
+happened.
+
+#### Friction
+
+Confirmed, not inferred: Salesforce redelivered the exact same event
+(same `eventId`/`correlationId`) after restart, the integration service
+processed it again with no awareness it had already succeeded, and
+ServiceNow ended up with **two separate Incidents**
+(`INC0010007`, `INC0010008`) for one business event. Verified
+independently at every boundary (checkpoint file contents, subscriber
+logs, and a direct `verify-recent-incidents.ts` query against ServiceNow
+- not just trusting the service's own console output).
+
+#### Impact
+
+This was previously an inference from reading the code (LL-0008); it is
+now a directly observed, reproducible failure. It confirms the
+replay-checkpoint mechanism added in the prior experiment (OB-0008),
+while genuinely useful for crash recovery, does **not** prevent
+ServiceNow-side duplicates on its own - and in fact makes the specific
+timing of *when* the checkpoint is written a first-class design
+decision, not an afterthought.
+
+#### Possible Enablement
+
+Not decided yet, and deliberately not fixed as part of this experiment
+(no idempotency, dedup, or retry logic was added). See
+`docs/devex/lessons-learned.md` LL-0008 (resolved) and its recommended
+next experiment: testing the *other* checkpoint-ordering semantic
+(write before calling ServiceNow, not after) to see what different
+failure mode that trades this one for.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

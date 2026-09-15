@@ -68,12 +68,24 @@ doesn't actually exist (FL-0013). The experiment also surfaced a sharper,
 still-open question (LL-0008): the checkpoint is written *after*
 ServiceNow succeeds, so a crash in that narrow window remains an untested
 duplicate-delivery vector, distinct from LL-0005's double-publish
-scenario. The recommended next experiment — deliberately force a crash in
-that window and observe the result — is proposed, not built. See
-`docs/devex/lessons-learned.md` (LL-0005–LL-0008) for the full analysis.
-Not yet built: any general retry / dead-letter / idempotency solution,
-and tests. See `services/integration-service/README.md` for current
-status.
+scenario.
+
+**That crash-window experiment has since been run too (OB-0009, FL-0015)
+— and it confirmed a real duplicate.** Using a single deterministic,
+env-var-gated crash point (no idempotency, dedup, or retry added),
+forcing a crash between "ServiceNow Incident created" and "checkpoint
+persisted" and then restarting produced exactly what LL-0008 predicted:
+Salesforce redelivered the event, and the integration service created a
+**second** ServiceNow Incident for the same `correlationId` — confirmed
+independently via `verify-recent-incidents.ts`, not just the service's
+own logs. The duplicate was recorded, not fixed, per that experiment's
+explicit scope. The recommended next step — test the *other* checkpoint
+ordering (write before calling ServiceNow, not after) to see what
+different failure mode it trades this one for — is proposed, not built.
+See `docs/devex/lessons-learned.md` (LL-0005–LL-0008) for the full
+analysis. Not yet built: any general retry / dead-letter / idempotency
+solution, and tests. See `services/integration-service/README.md` for
+current status.
 
 A Salesforce Developer Edition org (External Client App, JWT Bearer Flow)
 and a ServiceNow Developer Instance (Client Credentials grant, dedicated

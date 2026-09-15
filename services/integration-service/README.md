@@ -13,21 +13,29 @@ a real Pub/Sub API gRPC subscription, mapped onto the canonical nested
 `DistributorOnboardingRequestedEvent` shape (`src/types/events.ts`), and
 used to create a real ServiceNow Incident
 (`docs/decisions/0004-servicenow-authentication.md`). See
-`docs/devex/observations.md` (OB-0001–OB-0008) and
-`docs/devex/friction-log.md` (FL-0001–FL-0014).
+`docs/devex/observations.md` (OB-0001–OB-0009) and
+`docs/devex/friction-log.md` (FL-0001–FL-0015).
 
-Two known gaps were deliberately tested rather than assumed:
+Three known gaps were deliberately tested rather than assumed:
 
 - **Duplicate delivery** (FL-0011): confirmed — no idempotency boundary
   exists anywhere, not fixed.
 - **Crash recovery** (FL-0012): a minimal replay-checkpoint experiment
   (`src/salesforce/checkpoint.ts`) confirmed an event published while the
   service is offline **can** be recovered via `ReplayPreset.CUSTOM` — see
-  `docs/devex/observations.md` OB-0008. This is a working experiment, not
-  a production reliability feature: the checkpoint is written *after*
-  ServiceNow succeeds, leaving an untested window where a crash could
-  still cause a duplicate (FL-0014, `docs/devex/lessons-learned.md`
-  LL-0008) — the recommended next experiment targets exactly that gap.
+  `docs/devex/observations.md` OB-0008.
+- **The checkpoint-timing duplicate window** (FL-0014): confirmed real,
+  not just inferred. A deterministic experiment (OB-0009) forced a crash
+  between "ServiceNow Incident created" and "checkpoint persisted" —
+  Salesforce redelivered the event on restart and a **second** Incident
+  was created for the same `correlationId`. Not suppressed or fixed; see
+  `docs/devex/lessons-learned.md` LL-0008 for the confirmed finding and
+  the recommended next experiment (testing the opposite checkpoint
+  ordering).
+
+None of this is a production reliability feature — the checkpoint
+mechanism is a working experiment, and duplicates are currently possible
+by more than one route.
 
 ## Stack
 
@@ -86,6 +94,11 @@ package (premature until a second integration needs the same thing — see
 - `scripts/get-topic-info.ts` — calls the Pub/Sub API's `GetTopic` RPC and
   prints the raw response; used to verify what Salesforce actually
   exposes (e.g. retention) instead of assuming it (see FL-0013)
+- `EXPERIMENT_CRASH_BEFORE_CHECKPOINT=true npm run dev` — deterministic
+  test-only crash point in `pubsubClient.ts`: exits right after an event
+  is successfully processed but before its checkpoint is persisted, for
+  reproducing the FL-0014/FL-0015 duplicate-on-crash scenario. Off by
+  default; changes no normal-path behavior.
 
 ## Non-interactive auth setup
 
@@ -99,13 +112,15 @@ and
 ## What's deliberately not here yet
 
 - A general retry / dead-letter / idempotency solution — root causes are
-  understood and documented (FL-0011, FL-0012, FL-0014,
+  understood and **confirmed by direct experiment**, not just inferred
+  (FL-0011, FL-0012, FL-0014, FL-0015,
   `docs/devex/lessons-learned.md` LL-0005, LL-0006, LL-0008), but no fix
-  has been designed or built. The recommended next step is a small,
-  targeted experiment (deliberately crash between event processing and
-  checkpoint persistence, and observe whether a duplicate results) — see
-  LL-0008's "Recommended smallest Phase 3 Enablement experiment." Not the
-  same as building the fix itself.
+  has been designed or built. The recommended next step is testing the
+  opposite checkpoint ordering (write before calling ServiceNow, not
+  after) to see what different failure mode it trades the current
+  duplicate-on-crash behavior for — see LL-0008's "Recommended smallest
+  Phase 3 Enablement experiment." Not the same as building the fix
+  itself.
 - Tests
 - A narrower ServiceNow OAuth Auth Scope (currently relies on the
   dedicated user's `itil` role rather than API-level token scoping — see
