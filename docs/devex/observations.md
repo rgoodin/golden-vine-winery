@@ -54,4 +54,26 @@ rather than guessing at an approach.
 
 ---
 
+### OB-0002: Signed up for Developer Edition org, created External Client App
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Category:** environment setup / authentication
+
+Signed up for a Salesforce Developer Edition org (developer did this
+directly — account creation and email verification aren't something an
+agent should do on a developer's behalf). Generated a local self-signed
+cert/key pair, created an External Client App with the JWT Bearer Flow
+enabled and the cert uploaded, and retrieved the Consumer Key (after an
+email identity-verification step). Wired these into
+`services/integration-service/.env` (gitignored). See
+`docs/decisions/0002-authentication-strategy.md` and FL-0002/FL-0003 for
+what was learned along the way.
+
+Still open: the integration service's Pub/Sub subscriber
+(`src/salesforce/subscriber.ts`) remains a stub — having credentials
+doesn't yet mean there's a gRPC/Avro client that uses them (FL-0001).
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

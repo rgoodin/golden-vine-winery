@@ -5,6 +5,8 @@
 *.pem
 *.key
 *.p12
+*.crt
+certs/
 
 # OS
 .DS_Store

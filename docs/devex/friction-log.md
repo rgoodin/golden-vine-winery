@@ -87,4 +87,74 @@ client wrapper, a dev-org creation runbook.
 
 ---
 
+### FL-0002: "Connected App" UI has been replaced by "External Client Apps"
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+
+#### Observation
+
+Following documented/typical steps to create a Connected App in Setup →
+App Manager → "New Connected App" to configure JWT bearer auth for the
+integration service.
+
+#### Friction
+
+This newly-created Developer Edition org has no "New Connected App" button.
+Salesforce has replaced that flow with **External Client Apps** (Setup →
+App Manager → "New External Client App"). The field layout differs from
+older Connected App documentation/tutorials: OAuth settings live under a
+collapsible "API (Enable OAuth Settings)" section with an "Enable OAuth"
+checkbox, and JWT bearer setup is its own "Enable JWT Bearer Flow" checkbox
+under "Flow Enablement" (rather than a single "Use digital signatures"
+checkbox) which is what reveals the certificate upload field. The Consumer
+Key/Secret are also not shown on the main detail page — they're under the
+Settings tab → OAuth Settings → "Consumer Key and Secret" button, which
+triggers an email identity-verification step before revealing them.
+
+#### Impact
+
+Generic/older Salesforce tutorials and AI-generated instructions based on
+"Connected App" terminology don't match what a new Developer Edition org
+actually shows. Cost: a few rounds of back-and-forth navigating Setup
+together to find the right screen and re-derive the actual field layout.
+
+#### Possible Enablement
+
+Not decided yet. Candidate: a runbook/screenshot-annotated doc specific to
+the External Client App flow, since this is likely to trip up every future
+developer working from older Salesforce documentation.
+
+---
+
+### FL-0003: Consumer Key/Secret gated behind email identity verification
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+
+#### Observation
+
+Attempting to retrieve the Consumer Key for the newly created External
+Client App, needed for the integration service's `.env`.
+
+#### Friction
+
+Clicking "Consumer Key and Secret" doesn't show the values directly — it
+opens a "Verify Your Identity" page requiring a one-time code emailed to
+the org's contact email. This is a manual, human-in-the-loop step that
+can't be automated or skipped, and isn't mentioned in the App Manager UI
+until you click through.
+
+#### Impact
+
+Minor delay (checking email, entering code) but blocks any attempt to
+script/automate credential retrieval end-to-end.
+
+#### Possible Enablement
+
+None needed — this is expected security behavior, not a gap to fix. Worth
+documenting so future developers aren't surprised by it.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->
