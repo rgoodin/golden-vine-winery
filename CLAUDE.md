@@ -37,12 +37,17 @@ acted on:**
 - LL-0003: `docs/runbooks/salesforce-non-interactive-auth-setup.md` and
   `docs/runbooks/servicenow-non-interactive-auth-setup.md`.
 
-Re-run the Observation Review as more friction accumulates, per the
-Observation → Enablement → Mastery → Observation cycle — retry/idempotency
-work (not yet started) would be a good source of the next round, since
-that friction hasn't actually been experienced yet (only anticipated),
-per this file's Developer #1 principle. Not yet built: retry / dead-letter
-handling, idempotency, and tests. See
+**The anticipated retry/idempotency friction has since been deliberately
+experienced, not just guessed at** (FL-0011, FL-0012): publishing the same
+event twice creates two separate ServiceNow Incidents (no dedup exists
+anywhere), and a single ServiceNow failure currently crashes the entire
+subscriber process — which, combined with the `ReplayPreset: LATEST`
+subscription having no checkpointing, means a crashed-and-unnoticed
+process **silently loses** every event published while it's down, not
+merely delays them. See `docs/devex/observations.md` (OB-0007) for how
+these were tested. Neither has been fixed yet — observation precedes
+enablement; this is the next natural Phase 2 Observation Review input.
+Not yet built: retry / dead-letter handling, idempotency, and tests. See
 `services/integration-service/README.md` for current status.
 
 A Salesforce Developer Edition org (External Client App, JWT Bearer Flow)
