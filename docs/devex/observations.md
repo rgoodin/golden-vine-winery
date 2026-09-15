@@ -189,4 +189,35 @@ Phase 2 (Observation Review) before adding more code - see `CLAUDE.md`'s
 
 ---
 
+### OB-0007: Deliberately tested failure modes rather than building retry/idempotency blind
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Category:** error handling / testing
+
+Per `CLAUDE.md`'s Developer #1 principle ("do not prematurely automate a
+problem we have not experienced"), rather than building retry/idempotency
+handling speculatively, deliberately went and experienced the two
+relevant friction questions it lists:
+
+1. **Duplicate delivery:** extended `publish-test-event.ts` to accept a
+   fixed correlation ID, published the "same" event twice, and confirmed
+   two separate ServiceNow Incidents were created (FL-0011).
+2. **ServiceNow unavailable:** ran the subscriber with
+   `SERVICENOW_INSTANCE_URL` overridden to an invalid address (inline env
+   var, `.env` untouched) and published a real event. The whole process
+   crashed on an unhandled rejection rather than failing just that one
+   event (FL-0012) - a more severe finding than expected, since combined
+   with the `ReplayPreset: LATEST` subscription (no checkpointing), a
+   crashed process means silently lost events, not just delayed ones.
+
+Both experiments used only the existing test tooling
+(`publish-test-event.ts`, `verify-recent-incidents.ts`) - no new
+throwaway scripts needed, which is itself a small validation of LL-0004.
+
+Two concrete, real friction items now exist to inform whatever
+retry/idempotency design comes next, rather than guessing at requirements.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

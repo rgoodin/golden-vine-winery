@@ -409,4 +409,85 @@ Incident Table API if/when this integration needs tighter guarantees than
 
 ---
 
+### FL-0011: Duplicate Salesforce events create duplicate ServiceNow Incidents
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+
+#### Observation
+
+Deliberately tested what happens on duplicate delivery, per `CLAUDE.md`'s
+own Developer #1 question "How do I prevent duplicate processing?" —
+published the same event (same `Event_Id__c`/`Correlation_Id__c`) twice in
+a row via `scripts/publish-test-event.ts`.
+
+#### Friction
+
+Both publishes succeeded, and the subscriber created **two separate
+ServiceNow Incidents** (`INC0010002`, `INC0010003`) for what should be the
+same logical event — confirmed via `scripts/verify-recent-incidents.ts`.
+There is currently no idempotency check anywhere in the chain: not on
+receipt (no dedup by `eventId`/`replayId`), and not on the ServiceNow side
+(Incident creation doesn't check for an existing Incident with the same
+`correlation_id` first).
+
+#### Impact
+
+In a real deployment, any at-least-once redelivery from Salesforce's
+Pub/Sub API (which is exactly the guarantee it makes - see the official
+proto's comments on `replay_id`) would silently create duplicate
+operational work in ServiceNow every time.
+
+#### Possible Enablement
+
+Not decided yet — observation precedes enablement. Candidate: before
+creating an Incident, query ServiceNow for an existing one with the same
+`correlation_id` and skip/short-circuit if found. Would need to weigh
+against a proper replay-ID-based dedup on the Salesforce side instead.
+
+---
+
+### FL-0012: A single ServiceNow failure crashes the entire subscriber process, losing all subsequent events
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+
+#### Observation
+
+Deliberately tested what happens when ServiceNow is unreachable, per
+`CLAUDE.md`'s own Developer #1 question "What happens when ServiceNow is
+unavailable?" — ran the subscriber with `SERVICENOW_INSTANCE_URL`
+overridden to an invalid address, then published a real Salesforce event.
+
+#### Friction
+
+The ServiceNow `fetch` call failed as expected, but the error wasn't
+caught anywhere - the `async` event handler passed to `stream.on('data', ...)`
+in `pubsubClient.ts` threw, which isn't captured by the gRPC stream's
+`'error'` handler (that only fires for stream-level errors, not
+exceptions thrown inside a `'data'` listener). The result was an unhandled
+promise rejection that **crashed the entire Node process** - confirmed via
+`ps aux` after the fact.
+
+#### Impact
+
+This is more severe than "this one event fails": because the subscriber
+uses `ReplayPreset: LATEST` with no replay-ID checkpointing (see
+`src/salesforce/pubsubClient.ts`), a crashed-and-unnoticed process means
+every Salesforce event published while it's down is **permanently lost**,
+not merely delayed - there's nothing to replay from once it restarts.
+This also means one flaky ServiceNow call can silently stop the entire
+integration, not just the one record it was handling.
+
+#### Possible Enablement
+
+Not decided yet — observation precedes enablement. Candidates to weigh:
+catching/logging errors per-event instead of letting them propagate and
+kill the process; storing the `latest_replay_id` from each `FetchResponse`
+so a restart can resume with `ReplayPreset: CUSTOM` instead of `LATEST`;
+some combination of retry-with-backoff and dead-lettering for
+ServiceNow-side failures specifically.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

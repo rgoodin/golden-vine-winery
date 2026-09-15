@@ -6,17 +6,22 @@ import { config } from '../src/config';
  * Publishes a single test DistributorOnboardingRequested event via the
  * Salesforce REST API (sObject Platform Event publish), for exercising the
  * subscriber locally. Not part of the integration flow itself.
+ *
+ * Optional third argument: a fixed correlation/event ID, so the same
+ * "event" can be published more than once - for testing what happens on
+ * duplicate delivery (see docs/devex/friction-log.md).
  */
 async function main() {
   const distributorName = process.argv[2] ?? 'Test Distributor';
+  const fixedId = process.argv[3];
 
   const { accessToken, instanceUrl } = await authenticate();
   const objectApiName = config.salesforce.pubsubTopic.replace(/^\/event\//, '');
 
   const payload = {
-    Event_Id__c: randomUUID(),
+    Event_Id__c: fixedId ?? randomUUID(),
     Event_Version__c: '1.0',
-    Correlation_Id__c: randomUUID(),
+    Correlation_Id__c: fixedId ?? randomUUID(),
     Distributor_Name__c: distributorName,
     Distributor_External_Id__c: 'EXT-12345',
     Primary_Contact_Name__c: 'Jane Doe',
