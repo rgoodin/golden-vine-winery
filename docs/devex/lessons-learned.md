@@ -414,62 +414,97 @@ specifically the gap between processing and persisting the checkpoint —
 and that gap is now confirmed to actually produce duplicates in practice,
 not just in theory.
 
+---
+
+### LL-0009: The two checkpoint orderings have distinct, mutually exclusive, directly-confirmed failure modes — neither is simply "safer"
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Evidence:** FL-0015, FL-0016, OB-0009, OB-0010
+
+**Lesson:** Both possible orderings of "persist checkpoint" relative to
+"call ServiceNow" have now been directly tested with the same
+deterministic-crash method, not just reasoned about:
+
+| Ordering | Crash point | Confirmed result |
+|---|---|---|
+| Checkpoint **after** ServiceNow (current default) | After Incident created, before checkpoint saved | Event **redelivered**; **duplicate** ServiceNow Incident created (FL-0015, OB-0009) |
+| Checkpoint **before** ServiceNow (reversed for this experiment only) | After checkpoint saved, before ServiceNow called | Event **not redelivered**; **no** Incident ever created — business operation silently skipped (FL-0016, OB-0010) |
+
+Neither ordering is a free improvement over the other — each fully
+prevents the other's failure mode while fully exhibiting its own.
+Deliberately not picking one here: a duplicate is visible and mergeable
+after the fact; a silent loss is not detectable at all with what
+currently exists in this codebase (see the observability finding in
+OB-0010 — the crash-before-ServiceNow path produces no
+business-identifiable log trail). That asymmetry in *detectability*,
+not just in "does it happen," is itself a new finding neither individual
+experiment surfaced on its own — it only became visible by running both
+and comparing.
+
+**Implication:** Not choosing an architecture here, as instructed. What
+this comparison does establish: fixing this by picking "the less bad"
+ordering alone is not a real fix, since ordering B's failure mode is
+strictly harder to detect than ordering A's, even if it might be argued
+to be no more or less *frequent*. A durable fix likely needs either (a)
+a genuine correctness mechanism (idempotency and/or a server-side commit
+protocol, not just checkpoint reordering), or (b) at minimum, a way to
+detect when the silent-loss failure mode has occurred after the fact.
+(b) is smaller and orthogonal to picking an architecture — see the
+recommendation below.
+
+---
+
 ## Recommended smallest Phase 3 Enablement experiment (not started)
 
-The prior recommendation in this section (deliberately crash inside the
-processing/checkpoint gap and observe whether it causes a duplicate) has
-been **completed** — see OB-0009, FL-0015. It did: two ServiceNow
-Incidents for one event. This section now recommends the next one, based
-solely on what that experiment showed.
+The prior recommendation in this section (test the opposite checkpoint
+ordering and observe its failure mode) has been **completed** — see
+OB-0010, FL-0016. Combined with OB-0009/FL-0015, both orderings' failure
+modes are now directly confirmed and compared (LL-0009). This section
+recommends the next step based on that combined evidence, without
+selecting an architecture.
 
-The experiment confirmed the cost of today's ordering (checkpoint written
-*after* calling ServiceNow: duplicates on a crash in that gap). It did
-**not** test the alternative ordering's cost. So the single highest-value,
-smallest next experiment is: **write the checkpoint *before* calling
-ServiceNow instead of after, then re-run an equivalent crash experiment
-timed at the new boundary, and observe what failure mode that trades the
-current one for.**
+The comparison's clearest finding is about *detectability*, not just
+occurrence: ordering A's duplicate was trivial to find (query ServiceNow
+by correlation ID); ordering B's silent loss was only detectable in this
+experiment because the correlation ID was already known in advance from
+publishing the test event. In a real, non-experimental occurrence,
+nothing in this system would notice. So the single highest-value,
+smallest next investigation is: **can this system detect, after the
+fact, that a Pub/Sub replay checkpoint has advanced past an event that
+was never demonstrably acted on — without assuming a fix for either
+failure mode first?**
 
 Concretely (described here, not implemented — out of scope for this
-review):
+round):
 
-1. In `pubsubClient.ts`, move `saveCheckpoint(replayId)` to run
-   immediately after an event is received/decoded, *before* `onEvent`
-   (and therefore before `createOnboardingIncident`) is called.
-2. Add an equivalent deterministic crash point, timed to fire *during* or
-   immediately after the ServiceNow call but before it's known to have
-   succeeded — e.g. gated the same way as
-   `EXPERIMENT_CRASH_BEFORE_CHECKPOINT`, but placed inside or right after
-   the `fetch` in `src/servicenow/incidentAdapter.ts`.
-3. Run the same shape of experiment: publish an event, force the crash
-   right as/after ServiceNow is called, restart, and observe — via
-   `verify-recent-incidents.ts` and the subscriber's own logs — whether
-   the event is redelivered (it shouldn't be, since the checkpoint now
-   precedes the ServiceNow call) and, critically, whether an Incident
-   was actually created for it or not. The concrete question this
-   answers: does "checkpoint-first" trade the observed duplicate-Incident
-   failure mode for a *silent-loss* one (checkpoint says handled, but no
-   Incident exists), or does it turn out to be strictly better in
-   practice?
-4. Record the result plainly either way, the same as this round: a
-   silent loss is arguably worse than a duplicate (a duplicate is at
-   least visible and mergeable; a silently-dropped onboarding event may
-   not be noticed until a business process downstream fails to happen),
-   so this experiment could easily argue *against* switching the
-   ordering — that's a legitimate, evidence-based outcome, not a failed
-   experiment.
+1. Investigate what the Pub/Sub API actually offers for listing or
+   counting events in a known replay range (e.g. subscribing with
+   `ReplayPreset.CUSTOM` from an *old* checkpoint for a bounded window,
+   the way `GetTopic` was investigated in OB-0008, rather than assuming
+   a capability exists).
+2. If such a capability exists, the smallest experiment would replay a
+   known range spanning a deliberately-induced silent-loss gap (using
+   the same `EXPERIMENT_CHECKPOINT_BEFORE_SERVICENOW` mechanism already
+   built) and see whether the "lost" event can be identified as present
+   in Salesforce's history but absent from ServiceNow — i.e., gap
+   detection via cross-referencing, not prevention.
+3. Record whatever is found, including a negative result (if no such
+   detection is practically possible with the current architecture, that
+   itself is significant: it would mean prevention, not detection, is
+   the only viable path, which *would* start to narrow the eventual
+   architectural choice - but still isn't one).
 
-Why this over building idempotency or a full retry/dead-letter system
-directly (LL-0005's and LL-0006's candidates): both checkpoint orderings
-have now been reasoned about, but only one has been directly tested. This
-experiment completes the comparison with the same rigor already applied
-to the first ordering, before any fix is chosen. It's also worth noting,
-without pursuing it now: the Pub/Sub API's proto defines a separate
-`ManagedSubscribe` RPC with explicit `CommitReplayRequest`/`Response`
-messages - a server-side, application-controlled commit mechanism that
-might make this whole local-file checkpoint approach unnecessary. That's
-a larger investigation than "smallest," so it's noted here for future
-reference rather than recommended now.
+Why this over choosing and implementing a fix directly (idempotency,
+retries, `ManagedSubscribe`, or picking one checkpoint ordering as
+"good enough"): LL-0009 shows the two orderings tested so far are a
+trade-off, not a solution, and the detectability gap is the one
+dimension neither individual experiment measured. Investigating whether
+detection is even possible is smaller than building either a full
+correctness mechanism or a monitoring system, and its result directly
+shapes which architecture is worth pursuing - rather than guessing.
+`ManagedSubscribe`'s `CommitReplayRequest`/`Response` flow (noted in the
+prior round) remains a larger, deferred investigation, not this one.
 
 ---
 

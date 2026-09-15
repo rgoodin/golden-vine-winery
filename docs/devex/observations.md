@@ -376,4 +376,101 @@ for the recommendation.
 
 ---
 
+### OB-0010: Opposite-ordering experiment — confirmed silent event loss, not redelivery
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Category:** error handling / testing / recoverability / observability
+
+Ran the experiment LL-0008 recommended as the direct follow-up to
+OB-0009: if the checkpoint is persisted *before* calling ServiceNow, and
+the process terminates after that persistence but before ServiceNow is
+ever called, does restart skip the event entirely (leaving the business
+operation unperformed) rather than reprocess it? Scope stayed as narrow
+as OB-0009 - no idempotency, retries, deduplication, or `ManagedSubscribe`
+were implemented.
+
+**Mechanism added:** a second env-var-gated experimental block in
+`src/salesforce/pubsubClient.ts` -
+`EXPERIMENT_CHECKPOINT_BEFORE_SERVICENOW=true` temporarily reverses the
+normal order for that one code path: it calls `saveCheckpoint(replayId)`
+*before* `onEvent` (the ServiceNow call), then immediately calls
+`process.exit(1)` - so `onEvent` never runs and ServiceNow is never
+contacted. Off by default; the normal path (checkpoint after `onEvent`)
+is untouched when unset, confirmed by rereading the code after the
+experiment - no revert was necessary, since the new behavior only exists
+inside its own conditional.
+
+**Controlled experiment (steps A–J), evidence kept independent at each
+boundary:**
+
+    A. Known checkpoint already established at Event D (from OB-0009's
+       final state, replayId ending ...dHR0dDU=, captured
+       2026-09-15T20:11:19.992Z) - confirmed by reading
+       .checkpoint.json before starting.
+    B. Started the subscriber WITH the new flag set (resumed correctly
+       from Event D's checkpoint - confirmed the flag doesn't affect
+       startup), then published Event E ("...checkpoint-first crash
+       target").
+    C. Event E was received and decoded (implied - no error logged) -
+       see the observability note below on why this can't be confirmed
+       as directly as prior experiments.
+    D. The checkpoint was persisted BEFORE ServiceNow was ever called -
+       logged explicitly: "[experiment]
+       EXPERIMENT_CHECKPOINT_BEFORE_SERVICENOW set - checkpoint saved
+       BEFORE calling ServiceNow...".
+    E. Independently verified the checkpoint actually advanced: read
+       `.checkpoint.json` directly - now a new value
+       (`...T50AE04t...`, captured 2026-09-15T20:20:23.640Z), distinct
+       from Event D's.
+    F. Forced termination occurred immediately after (`process.exit(1)`)
+       - confirmed independently via `ps aux` showing no process.
+    G. Independently verified via `verify-recent-incidents.ts` (a live
+       ServiceNow query) that **no** Incident existed for Event E's
+       correlation ID at this point.
+    H. Restarted the subscriber normally (no experimental flags) -
+       resumed with `ReplayPreset.CUSTOM` from Event E's now-persisted
+       checkpoint.
+    I. Waited ~28 seconds (longer than redelivery took in OB-0009's
+       equivalent step) - **no "Received DistributorOnboardingRequested
+       event" log ever appeared.** Event E was not redelivered.
+    J. Independently re-verified via `verify-recent-incidents.ts`: still
+       **zero** Incidents for Event E's correlation ID, after the
+       restart. The business operation was never performed.
+
+**Result: yes.** Persisting the checkpoint before calling ServiceNow, and
+crashing in that window, causes the event to be silently skipped on
+restart - not reprocessed, not recovered, not visible anywhere as a
+failure. This directly answers this experiment's one question.
+
+**An observability finding, not planned but significant:** step C
+couldn't be confirmed the same way OB-0008/OB-0009 confirmed "receipt" -
+in those experiments, `onEvent`'s own console log printed the full
+decoded event (including `correlationId`, distributor name, etc.)
+because `onEvent` actually ran. Here, the crash happens *before*
+`onEvent`, so the only evidence of Event E's existence in the logs is an
+opaque base64 replay ID tied to a generic `[experiment]`/`[checkpoint]`
+line - nothing human-searchable. The inference that this checkpoint
+corresponds specifically to Event E rests on sequencing (it was the only
+event published since Event D's checkpoint) and is corroborated
+after the fact by steps I/J (no redelivery, no Incident - consistent
+with the checkpoint already covering it), not by a direct log
+correlation at the time it happened.
+
+**Distinguishing the four things kept separate, as in OB-0009:**
+- *Salesforce delivery*: inferred from sequencing and the checkpoint
+  change, not directly logged (see observability finding above) - the
+  one boundary this experiment could not evidence as cleanly as OB-0009.
+- *Integration-service processing*: confirmed **not** to have happened -
+  `onEvent`/`createOnboardingIncident` never ran, by design and by the
+  absence of any "Created ServiceNow Incident" log on either run.
+- *ServiceNow side effects*: confirmed independently, twice (steps G and
+  J), via live queries - zero Incidents, both before and after restart.
+- *Checkpoint state*: confirmed by reading `.checkpoint.json` directly at
+  two points - advanced to a new value immediately after the crash
+  (step E), then unchanged through the restart since no further event
+  arrived to re-checkpoint.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

@@ -13,10 +13,10 @@ a real Pub/Sub API gRPC subscription, mapped onto the canonical nested
 `DistributorOnboardingRequestedEvent` shape (`src/types/events.ts`), and
 used to create a real ServiceNow Incident
 (`docs/decisions/0004-servicenow-authentication.md`). See
-`docs/devex/observations.md` (OB-0001–OB-0009) and
-`docs/devex/friction-log.md` (FL-0001–FL-0015).
+`docs/devex/observations.md` (OB-0001–OB-0010) and
+`docs/devex/friction-log.md` (FL-0001–FL-0016).
 
-Three known gaps were deliberately tested rather than assumed:
+Several known gaps were deliberately tested rather than assumed:
 
 - **Duplicate delivery** (FL-0011): confirmed — no idempotency boundary
   exists anywhere, not fixed.
@@ -24,18 +24,20 @@ Three known gaps were deliberately tested rather than assumed:
   (`src/salesforce/checkpoint.ts`) confirmed an event published while the
   service is offline **can** be recovered via `ReplayPreset.CUSTOM` — see
   `docs/devex/observations.md` OB-0008.
-- **The checkpoint-timing duplicate window** (FL-0014): confirmed real,
-  not just inferred. A deterministic experiment (OB-0009) forced a crash
-  between "ServiceNow Incident created" and "checkpoint persisted" —
-  Salesforce redelivered the event on restart and a **second** Incident
-  was created for the same `correlationId`. Not suppressed or fixed; see
-  `docs/devex/lessons-learned.md` LL-0008 for the confirmed finding and
-  the recommended next experiment (testing the opposite checkpoint
-  ordering).
+- **Both possible checkpoint orderings' failure modes are now confirmed
+  and compared (LL-0009)**, not just one: checkpointing *after* calling
+  ServiceNow (current default) causes a **duplicate** Incident if a crash
+  lands between the two (FL-0015, OB-0009); checkpointing *before*
+  calling ServiceNow instead causes a **silent loss** — no Incident is
+  ever created, with no log trail to find it by (FL-0016, OB-0010).
+  Neither is simply safer; the silent-loss mode is markedly harder to
+  detect. Not fixed — see `docs/devex/lessons-learned.md` LL-0009 for the
+  comparison and the recommended next investigation (whether this system
+  can detect a silent loss after the fact, before picking a fix).
 
 None of this is a production reliability feature — the checkpoint
-mechanism is a working experiment, and duplicates are currently possible
-by more than one route.
+mechanism is a working experiment, both its possible orderings have known
+failure modes, and no architecture has been chosen yet.
 
 ## Stack
 
@@ -99,6 +101,12 @@ package (premature until a second integration needs the same thing — see
   is successfully processed but before its checkpoint is persisted, for
   reproducing the FL-0014/FL-0015 duplicate-on-crash scenario. Off by
   default; changes no normal-path behavior.
+- `EXPERIMENT_CHECKPOINT_BEFORE_SERVICENOW=true npm run dev` —
+  deterministic test-only fault injection that reverses the normal order
+  for one event: persists the checkpoint, then exits *before* ServiceNow
+  is ever called, reproducing the FL-0016/OB-0010 silent-loss scenario.
+  Mutually exclusive with the flag above; off by default, changes no
+  normal-path behavior.
 
 ## Non-interactive auth setup
 
@@ -112,15 +120,14 @@ and
 ## What's deliberately not here yet
 
 - A general retry / dead-letter / idempotency solution — root causes are
-  understood and **confirmed by direct experiment**, not just inferred
-  (FL-0011, FL-0012, FL-0014, FL-0015,
-  `docs/devex/lessons-learned.md` LL-0005, LL-0006, LL-0008), but no fix
-  has been designed or built. The recommended next step is testing the
-  opposite checkpoint ordering (write before calling ServiceNow, not
-  after) to see what different failure mode it trades the current
-  duplicate-on-crash behavior for — see LL-0008's "Recommended smallest
-  Phase 3 Enablement experiment." Not the same as building the fix
-  itself.
+  understood and **confirmed by direct experiment on both possible
+  checkpoint orderings**, not just inferred (FL-0011, FL-0012, FL-0014,
+  FL-0015, FL-0016, `docs/devex/lessons-learned.md` LL-0005, LL-0006,
+  LL-0008, LL-0009), but no fix has been designed or built, and no
+  architecture has been chosen between them. The recommended next step is
+  investigating whether a silent loss can be *detected* after the fact —
+  see LL-0009's "Recommended smallest Phase 3 Enablement experiment." Not
+  the same as building the fix itself.
 - Tests
 - A narrower ServiceNow OAuth Auth Scope (currently relies on the
   dedicated user's `itil` role rather than API-level token scoping — see

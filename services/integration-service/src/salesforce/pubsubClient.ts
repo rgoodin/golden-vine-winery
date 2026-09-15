@@ -123,6 +123,26 @@ export async function subscribe(
       const payload = avroType.fromBuffer(consumerEvent.event.payload as Buffer);
       const replayId = consumerEvent.replayId as Buffer;
 
+      // Experimental, deterministic fault injection (Phase 3 Enablement,
+      // LL-0008 follow-up): temporarily REVERSES normal ordering to test
+      // the opposite checkpoint-write timing - persist the checkpoint
+      // BEFORE calling ServiceNow, then force termination before
+      // ServiceNow is ever called. Tests whether that ordering causes
+      // the event to be silently skipped on restart instead of
+      // reprocessed. Mutually exclusive with
+      // EXPERIMENT_CRASH_BEFORE_CHECKPOINT below. Never set outside this
+      // one experiment; normal ordering (checkpoint after onEvent) is
+      // untouched when this is unset.
+      if (process.env.EXPERIMENT_CHECKPOINT_BEFORE_SERVICENOW === 'true') {
+        saveCheckpoint(replayId);
+        console.log(
+          `[experiment] EXPERIMENT_CHECKPOINT_BEFORE_SERVICENOW set - checkpoint saved ` +
+            `BEFORE calling ServiceNow (replayId=${replayId.toString('base64')}), ` +
+            'now forcing exit before onEvent (the ServiceNow call) runs.'
+        );
+        process.exit(1);
+      }
+
       await onEvent({
         schemaId,
         payload: payload as Record<string, unknown>,

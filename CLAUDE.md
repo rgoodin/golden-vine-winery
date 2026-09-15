@@ -23,69 +23,41 @@ Definition of Success," achieved. See `docs/devex/observations.md`
 (OB-0001–OB-0006) for how it was proven and `docs/devex/friction-log.md`
 (FL-0001–FL-0010) for everything learned getting there.
 
-**Phase 2 (Observation Review) has been done once** — see
-`docs/devex/lessons-learned.md` for the classification and four lessons
-(LL-0001–LL-0004) synthesized from the Phase 1 friction/observations so
-far. **Both Phase 3 (Enablement) candidates from that review are now
-acted on:**
+**Phase 2 (Observation Review) has been done twice** — see
+`docs/devex/lessons-learned.md` for the full history (LL-0001–LL-0009).
+Summary of how we got here: the first review's two Phase 3 candidates
+were both built (LL-0004: `scripts/lib/salesforceTooling.ts` +
+`scripts/verify-recent-incidents.ts`, kept local to this service, not a
+shared package — only one real consumer exists so far; LL-0003:
+`docs/runbooks/salesforce-non-interactive-auth-setup.md` and
+`docs/runbooks/servicenow-non-interactive-auth-setup.md`). Then, rather
+than build retry/idempotency speculatively, that friction was
+deliberately experienced: duplicate delivery and a process-crashing
+ServiceNow failure were both confirmed real (FL-0011, FL-0012, OB-0007),
+analyzed in a second review (LL-0005–LL-0007), and a minimal replay
+checkpoint was built and proven to recover offline events
+(`src/salesforce/checkpoint.ts`, OB-0008) — while also correcting an
+earlier wrong claim about Salesforce exposing retention info via
+`GetTopic` (it doesn't - FL-0013).
 
-- LL-0004: `scripts/lib/salesforceTooling.ts` +
-  `scripts/verify-recent-incidents.ts`, kept local to this service (not a
-  shared cross-service package — only one real consumer exists so far,
-  so generalizing further stays premature until Phase 5, the SharePoint
-  integration, needs it).
-- LL-0003: `docs/runbooks/salesforce-non-interactive-auth-setup.md` and
-  `docs/runbooks/servicenow-non-interactive-auth-setup.md`.
+**Two further deterministic experiments have since directly confirmed
+both checkpoint orderings' failure modes (LL-0009):**
 
-**The anticipated retry/idempotency friction has since been deliberately
-experienced, not just guessed at** (FL-0011, FL-0012): publishing the same
-event twice creates two separate ServiceNow Incidents (no dedup exists
-anywhere), and a single ServiceNow failure currently crashes the entire
-subscriber process — which, combined with the `ReplayPreset: LATEST`
-subscription having no checkpointing, means a crashed-and-unnoticed
-process **silently loses** every event published while it's down, not
-merely delays them. See `docs/devex/observations.md` (OB-0007) for how
-these were tested.
+| Ordering | Confirmed result |
+|---|---|
+| Checkpoint **after** ServiceNow (current default) | Crash → event **redelivered** → **duplicate** Incident (FL-0015, OB-0009) |
+| Checkpoint **before** ServiceNow (tested via a reversible experimental flag) | Crash → event **not redelivered** → **silent loss**, no Incident ever created (FL-0016, OB-0010) |
 
-**A second Phase 2 Observation Review (LL-0005–LL-0007) then analyzed that
-finding** — duplicate delivery, failure isolation, Salesforce's
-replay/checkpoint behavior, retry, and recoverability, each with observed
-facts kept explicitly separate from candidate solutions (no architecture
-chosen). It surfaced a real connection: fixing checkpoint/replay recovery
-would likely *increase* how often duplicates are seen, so the two
-shouldn't be designed independently. It recommended one small experiment:
-capture the Pub/Sub replay checkpoint and directly observe whether it
-recovers a missed event.
-
-**That experiment has since been run (OB-0008) — and it worked.** A
-minimal checkpoint (`src/salesforce/checkpoint.ts`, wired into
-`pubsubClient.ts`) let the subscriber recover a real Salesforce event
-published while it was offline, via `ReplayPreset.CUSTOM`. No duplicate
-occurred in that clean-shutdown test. Along the way, `GetTopic`
-(`scripts/get-topic-info.ts`) was called directly and corrected an
-earlier wrong claim in LL-0007 about a `retention_policy` field that
-doesn't actually exist (FL-0013). The experiment also surfaced a sharper,
-still-open question (LL-0008): the checkpoint is written *after*
-ServiceNow succeeds, so a crash in that narrow window remains an untested
-duplicate-delivery vector, distinct from LL-0005's double-publish
-scenario.
-
-**That crash-window experiment has since been run too (OB-0009, FL-0015)
-— and it confirmed a real duplicate.** Using a single deterministic,
-env-var-gated crash point (no idempotency, dedup, or retry added),
-forcing a crash between "ServiceNow Incident created" and "checkpoint
-persisted" and then restarting produced exactly what LL-0008 predicted:
-Salesforce redelivered the event, and the integration service created a
-**second** ServiceNow Incident for the same `correlationId` — confirmed
-independently via `verify-recent-incidents.ts`, not just the service's
-own logs. The duplicate was recorded, not fixed, per that experiment's
-explicit scope. The recommended next step — test the *other* checkpoint
-ordering (write before calling ServiceNow, not after) to see what
-different failure mode it trades this one for — is proposed, not built.
-See `docs/devex/lessons-learned.md` (LL-0005–LL-0008) for the full
-analysis. Not yet built: any general retry / dead-letter / idempotency
-solution, and tests. See `services/integration-service/README.md` for
-current status.
+Neither is simply "safer" — each fully prevents the other's failure mode
+while fully exhibiting its own, and the silent-loss mode is markedly
+harder to detect (no business-identifiable log trail at all). No
+architecture has been chosen. The recommended next step — investigate
+whether this system can detect, after the fact, that a replay checkpoint
+skipped an event that was never acted on, before picking a fix — is
+proposed, not built. See `docs/devex/lessons-learned.md` LL-0008–LL-0009
+for the full comparison and reasoning. Not yet built: any general retry /
+dead-letter / idempotency solution, and tests. See
+`services/integration-service/README.md` for current status.
 
 A Salesforce Developer Edition org (External Client App, JWT Bearer Flow)
 and a ServiceNow Developer Instance (Client Credentials grant, dedicated

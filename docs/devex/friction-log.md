@@ -625,4 +625,54 @@ failure mode that trades this one for.
 
 ---
 
+### FL-0016: Confirmed — checkpoint-before-ServiceNow causes silent event loss, not redelivery
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+
+#### Observation
+
+Directly tested the opposite of FL-0014/FL-0015's checkpoint ordering
+(`docs/devex/observations.md` OB-0010): temporarily reversed
+`pubsubClient.ts` to persist the replay checkpoint *before* calling
+ServiceNow, added a second deterministic crash point right after that
+checkpoint write, and observed what happens on restart.
+
+#### Friction
+
+Confirmed, not inferred: with the checkpoint persisted first, forcing a
+crash before ServiceNow was ever called meant that on restart,
+`ReplayPreset.CUSTOM` correctly resumed *after* the checkpointed replay
+ID — so the event was never redelivered. Nothing else in the system ever
+calls ServiceNow for it. Independently confirmed via
+`verify-recent-incidents.ts`, both immediately after the crash and again
+after the restart with no redelivery: zero Incidents ever existed for
+that event's correlation ID. The business operation (distributor
+onboarding) never happened, and nothing in this system detects that.
+
+A related, unplanned finding: because the crash happens *before*
+`onEvent` runs, there is no log line anywhere containing the event's
+`correlationId` or any other business-identifiable field for this code
+path - only an opaque base64 replay ID. In a real (non-experimental)
+occurrence of this failure mode, there would be effectively no trace to
+search for or alert on.
+
+#### Impact
+
+This is the mirror image of FL-0015, and arguably worse in a concrete
+way: FL-0015's duplicate was visible (two ServiceNow Incidents exist,
+just both need to be reconciled) and self-evidently wrong. This failure
+mode leaves no ServiceNow record and no readily-searchable log trail —
+the event is simply gone unless someone independently notices the
+missing business outcome.
+
+#### Possible Enablement
+
+Not decided, and deliberately not fixed (no idempotency, dedup, retry,
+or `ManagedSubscribe` was added or investigated). See
+`docs/devex/lessons-learned.md` LL-0009 for the direct comparison of both
+orderings and the recommended next investigation.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->
