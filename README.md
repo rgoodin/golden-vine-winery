@@ -85,8 +85,13 @@ followed, establishing exactly what does and doesn't hold up under
 failure (duplicate delivery, crash recovery, silent loss, and whether
 either is detectable after the fact) - culminating in an architecture
 spike investigating how to guarantee "exactly one Incident per business
-event." No architecture has been chosen yet; the evidence doesn't yet
-discriminate between the two strongest candidates.
+event," followed by a focused ServiceNow concurrency experiment: with no
+enforced uniqueness constraint in place, two simultaneous requests for
+the same business operation both succeeded, creating two Incidents -
+confirming the failure mode is real, while attempts to actually create a
+platform-enforced unique index proved inconclusive. No architecture has
+been chosen yet; the evidence still doesn't fully discriminate between
+the two strongest candidates.
 
 See [`CLAUDE.md`](./CLAUDE.md) ("Current Repository State") for the
 up-to-date summary,

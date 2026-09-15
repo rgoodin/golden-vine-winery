@@ -733,4 +733,87 @@ recommended next step.
 
 ---
 
+### FL-0018: ServiceNow's admin UI resists creating a genuine unique index, even with human-authenticated admin access
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+
+#### Observation
+
+The spike's own recommended next step (OB-0013) was to have someone with
+real ServiceNow admin access check what uniqueness mechanisms are
+actually configurable, rather than reasoning from docs or from the
+`itil` integration user's blocked access. Did exactly that, via a
+human-authenticated admin browser session — deliberately not by
+expanding the `itil` OAuth credentials' privileges (see OB-0015).
+
+#### Friction
+
+Confirmed `sys_dictionary` has no native "Unique" checkbox on either
+`task.correlation_id` or `task.number` in this instance (exhaustively
+checked, including the Dictionary Entry form's "Advanced view") — so the
+real mechanism is `sys_index` (column-level uniqueness, `unique_index`
+boolean, `access_method`, e.g. `btree`). Getting an actual unique index
+persisted from there took three attempts, in order:
+
+1. **Direct `sys_index.do` record creation (admin UI's raw new-record
+   form):** the `Table` and `Access Method` fields set correctly and
+   verifiably via the platform's own `g_form` client API (confirmed
+   in-DOM, not just assumed), but submitting via the classic
+   `sys_action=sysverb_insert` form-post mechanism returned a
+   server-side `Error Message: Invalid insert`. No footer Save/Submit
+   button existed on this page at all — the only way to submit it was
+   via the classic hidden-field mechanism.
+2. **The purpose-built "Database Indexes" wizard**, reached from the
+   Incident table's own `sys_db_object` record (a distinct,
+   `v_index_creator`-backed related list — not the raw `sys_index` list
+   view). Here the "Unique Index" checkbox *was* genuinely editable
+   (confirmed via `disabled`/`readOnly` both `false`, unlike the raw
+   form) once a column was added via the slushbucket field picker. The
+   custom field `u_gv_business_operation_id` (created for this
+   investigation — see the architecture spike doc for its exact
+   configuration) was selected, "Unique Index" was checked, and "Create
+   Index" was submitted three separate ways (real UI click, and the
+   underlying `indexConfirm('incident')` handler invoked directly) — all
+   three produced a `200` response from ServiceNow's `xmlhttp.do`
+   endpoint with no error surfaced to the caller, yet a subsequent,
+   verifiably-working filtered query
+   (`sys_index_list.do?sysparm_query=logical_table_name=incident`,
+   confirmed to correctly return zero rows both before and after every
+   attempt) never showed a persisted index record.
+
+#### Impact
+
+This is a real, reproducible practical barrier, not a definitive "not
+possible" — the wizard's client-side code accepted the configuration and
+the server acknowledged the request, but no index resulted, and no
+in-page error explained why. Whether this is a deliberate platform
+safeguard (e.g. requiring a background schema job, a licensing gate, or
+a piece of interactive confirmation this automated session could not
+safely trigger — see below) or an instance-specific quirk is unresolved.
+Either way, "ServiceNow lets an admin add a unique index" is **not** the
+same claim as "an admin can reliably do so through the standard UI in
+under a few well-formed attempts" — that gap is itself evidence relevant
+to how attractive target-side idempotency is as an operational choice,
+independent of whether it's theoretically achievable.
+
+One methodological note worth keeping: this session avoided ever
+clicking through a native browser `confirm()`/`alert()` dialog (a hard
+tooling-safety constraint), instead stubbing `window.confirm`/`alert` to
+observe whether the index-creation handler used one. It never did in any
+of the three attempts — so the silent no-result outcome was not simply
+an un-clicked confirmation dialog.
+
+#### Possible Enablement
+
+Not decided. If target-side idempotency is pursued further, the next
+step would be a ServiceNow-side investigation with actual platform
+support access (or ServiceNow's own support channel) to determine why
+index creation silently no-ops in this instance — not something to keep
+guessing at through the UI. See
+`docs/architecture/0001-reliability-architecture-spike.md` for how this
+folds into the candidate comparison.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

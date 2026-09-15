@@ -11,7 +11,8 @@
     "create-platform-event-fields": "ts-node scripts/create-platform-event-fields.ts",
     "verify-recent-incidents": "ts-node scripts/verify-recent-incidents.ts",
     "get-topic-info": "ts-node scripts/get-topic-info.ts",
-    "detect-unprocessed-events": "ts-node scripts/detect-unprocessed-events.ts"
+    "detect-unprocessed-events": "ts-node scripts/detect-unprocessed-events.ts",
+    "test-servicenow-concurrent-idempotency": "ts-node scripts/test-servicenow-concurrent-idempotency.ts"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.10.9",

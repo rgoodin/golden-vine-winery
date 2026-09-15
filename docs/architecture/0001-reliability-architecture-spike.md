@@ -1,10 +1,11 @@
 # Architecture Spike: Guaranteeing Exactly-One Incident per Business Event
 
 **Status:** SPIKE — investigation only. No decision made, no ADR written.
-**Date:** 2026-09-15
-**Related:** `docs/devex/friction-log.md` FL-0011–FL-0017,
-`docs/devex/observations.md` OB-0007–OB-0012,
-`docs/devex/lessons-learned.md` LL-0005–LL-0011,
+**Date:** 2026-09-15 (updated same day with a focused ServiceNow
+target-side idempotency follow-up — see §3a and §3b)
+**Related:** `docs/devex/friction-log.md` FL-0011–FL-0018,
+`docs/devex/observations.md` OB-0007–OB-0015,
+`docs/devex/lessons-learned.md` LL-0005–LL-0012,
 `docs/decisions/0001`–`0004`
 
 ## Purpose
@@ -125,17 +126,91 @@ investigation surfaces, not something it can close alone.
   two Incidents were created with an identical `correlation_id` via plain
   Table API `POST`s, twice, with zero errors (FL-0011, FL-0015).
 - Attempted to inspect `sys_dictionary` directly to check whether/how a
-  uniqueness constraint could be added - **blocked**: the dedicated
-  `itil`-role integration user received "Insufficient rights to query
-  records." Schema-level changes would need privileges beyond what
-  ADR 0004 deliberately granted this integration. This is itself a
-  platform-access finding, not a workaround target.
+  uniqueness constraint could be added, using the dedicated `itil`-role
+  integration user - **blocked**: "Insufficient rights to query
+  records." Schema-level investigation needs privileges beyond what
+  ADR 0004 deliberately granted this integration (OB-0015). **This was
+  followed up with a real admin session - see §3a and §3b below, which
+  supersede this bullet's original "blocked, unresolved" status with
+  concrete findings.**
 - Import Sets + Transform Maps support "coalesce" fields, a documented
   ServiceNow pattern for upsert-by-arbitrary-key on import - a real,
   known capability, but **not independently verified against this
   instance**, and switching from the Table API to Import Sets is an
   architecture change (different endpoint, asynchronous transform,
-  admin-level setup), not a config tweak.
+  admin-level setup), not a config tweak. Still not verified - out of
+  scope for §3a/§3b's focused follow-up, which targeted `sys_index`
+  instead (the mechanism actually discovered by inspecting the schema
+  directly, per below).
+
+### 3a. Admin-access schema investigation (this round's follow-up)
+
+Conducted via a human-authenticated ServiceNow admin browser session -
+**not** by expanding the `itil` OAuth credentials' privileges (OB-0015).
+
+- **Confirmed empirically:** `sys_dictionary` has no native "Unique"
+  checkbox on either `task.correlation_id` or `task.number` in this
+  instance, checked exhaustively including the Dictionary Entry form's
+  "Advanced view." The original spike's framing ("blocked, so unknown")
+  was itself incomplete in one respect - even with full access, this
+  specific mechanism doesn't exist on this instance the way it might on
+  others; **`sys_dictionary` was never going to be the answer.**
+- **The real mechanism is `sys_index`:** a `unique_index` boolean,
+  `access_method` (e.g. `btree`), keyed to a table + one or more
+  columns. Getting one actually persisted proved to be its own
+  unresolved obstacle - **see FL-0018 for the full account.** In short:
+  a direct `sys_index.do` record submission was rejected server-side
+  (`Invalid insert`); the platform's own purpose-built "Database
+  Indexes" creation wizard (reached from the Incident table's schema
+  record) accepted a fully-configured request (custom field selected,
+  "Unique Index" checked) and returned `200`/success-shaped responses
+  across three separate submission attempts, but **no index record was
+  ever actually persisted**, confirmed via a verified-working filtered
+  query before and after each attempt.
+- **This is inconclusive, not a definitive "ServiceNow can't do this."**
+  It might be a licensing gate, an async background job this session
+  didn't wait long enough for, or an instance-specific quirk - the
+  wizard gave no error to explain the gap. What it *does* establish is
+  that "ServiceNow supports unique indexes" (true in general, per
+  ServiceNow's own platform documentation) is not the same claim as "an
+  admin can reliably add one to the Incident table through the standard
+  UI here" - and that gap is itself relevant operational evidence, not
+  just a research inconvenience (see LL-0012).
+
+### 3b. Concurrency experiment: what happens today, with no enforced constraint
+
+Per this round's explicit instruction, this was **not** tested as
+"create, then look up, then don't create" (which only proves the
+integration's own code can query before writing). Instead:
+`scripts/test-servicenow-concurrent-idempotency.ts` generates one
+business-operation ID, then fires two Incident-create `POST` requests
+**concurrently, via `Promise.all`**, against `/api/now/table/incident`,
+using a dedicated custom field (`u_gv_business_operation_id` - created
+for this investigation, `String(64)`, permitted per this round's
+instructions since the existing `correlation_id`/`Correlation_Id__c`
+semantics were not to be assumed sufficient - see §2) - using the
+existing `itil`-role OAuth credentials, no privilege change.
+
+**Result (OB-0014):** both requests received `201 Created`. ServiceNow
+created **two separate Incidents** (`INC0010009`, `INC0010010`) for the
+identical business-operation ID. Neither caller was rejected or told
+about the other - both received ordinary, full success responses. An
+independent follow-up `GET` query confirmed both records exist.
+
+This directly answers this document's core question for the
+**unconstrained configuration**: no, ServiceNow does not incidentally
+prevent this - two Incidents resulted from one business operation
+requested twice, concurrently, exactly as the risk diagram predicted.
+Whether a *successfully enforced* unique index (had §3a's attempts
+succeeded) would have produced a different, single-winner result remains
+genuinely untested - this experiment could only exercise the
+configuration that actually exists in this instance today.
+
+As a side effect, this experiment also resolves one item from §6's
+original unresolved-questions list: the follow-up `GET` reliably found
+both newly-created records immediately after their `POST`s completed -
+no read-after-write staleness was observed for this Table API endpoint
+in this test.
 
 **Salesforce:**
 - `ManagedSubscribe` is explicitly marked "part of an open beta release,"
@@ -167,24 +242,30 @@ everything already recorded.)
 ### A. Target-side idempotency (ServiceNow enforces it)
 
 **What was investigated:** whether ServiceNow can enforce or naturally
-support idempotent creation keyed on an external/correlation identifier.
-See Platform Findings above for the concrete results.
+support idempotent creation keyed on an external/correlation identifier
+- including, this round, a direct concurrency experiment against the
+unconstrained field and three attempts (via real admin access) to
+actually create a platform-enforced unique index. See §3a/§3b for the
+concrete results.
 
 **Failure-mode analysis:**
 
 | Failure mode | Result |
 |---|---|
 | Crash before target side effect | Safe - nothing happened yet |
-| Crash after target side effect, before checkpoint | **Solved**, if a real uniqueness mechanism (e.g. Import Set coalesce) exists - a retried create would be rejected/coalesced by ServiceNow itself |
-| Replay/redelivery | **Solved**, same reasoning |
-| Duplicate source publication (same `correlationId`) | **Solved** - this is exactly the case a correlation-keyed constraint is designed to catch |
+| Crash after target side effect, before checkpoint | **Unproven, not solved.** Would require a real uniqueness mechanism (e.g. a `sys_index` unique constraint, or Import Set coalesce) - attempts to create one this round did not succeed (FL-0018/§3a). Confirmed *without* one, two concurrent creates both succeed (§3b) |
+| Replay/redelivery | Same as above - depends entirely on the unproven enforcement mechanism |
+| Duplicate source publication (same `correlationId`) | **Directly tested and failed to hold**, for the current (unconstrained) configuration: two concurrent requests for the same business-operation ID both created an Incident (OB-0014) |
 | Temporary ServiceNow failure | Unaddressed - orthogonal |
-| Process restart | **Solved**, same as redelivery |
+| Process restart | Same dependency as redelivery, above |
 
-Notably, if implemented, this candidate would let the integration keep
-today's *simpler* checkpoint ordering (checkpoint after ServiceNow)
-safely - the duplicate-prevention work moves entirely to ServiceNow, and
-FL-0015's failure mode stops mattering.
+If a real enforcement mechanism could be made to work, this candidate
+would still let the integration keep today's *simpler* checkpoint
+ordering (checkpoint after ServiceNow) safely - the duplicate-prevention
+work would move entirely to ServiceNow, and FL-0015's failure mode would
+stop mattering. That conclusion now carries a bigger "if" than the
+spike's first pass could know: the enforcement mechanism itself is the
+open question, not a detail to fill in later.
 
 ### B. Lookup-before-create / correlation-based processing
 
@@ -288,11 +369,14 @@ identity is a publisher-contract problem, not a field-availability one.
 
 ## 5. Tradeoffs
 
-- **A (target-side):** Strongest guarantee if achievable, but requires
-  ServiceNow admin work outside this integration's current privileges -
-  the deliberately least-privileged `itil` user (ADR 0004) can't even
-  read `sys_dictionary`. The most robust route (Import Set + coalesce) is
-  an architecture change, not a config tweak.
+- **A (target-side):** Would be the strongest guarantee *if* achievable,
+  but this round's direct attempt to achieve it (with genuine admin
+  access, not blocked by ADR 0004's least-privilege stance) did not
+  succeed in three separate ways (FL-0018), and the concurrency
+  experiment confirms the unconstrained failure mode is real and current
+  (OB-0014). The most robust untested route (Import Set + coalesce)
+  remains an architecture change, not a config tweak, and was not
+  attempted this round.
 - **B (lookup-before-create):** Smallest, fastest, reuses proven code -
   but a race-prone mitigation, not a guarantee, unless paired with A.
 - **C (durable state):** Most complete and most platform-agnostic, but
@@ -312,19 +396,30 @@ FL-0017, independent of whichever of A/C is eventually chosen here.
 
 ## 6. Unresolved questions
 
-- Whether ServiceNow Table API `POST` responses are visible to an
-  immediate subsequent `GET` (read-after-write consistency) - determines
-  how large Candidate B's race window really is. Not tested.
-- Whether Import Set + Transform Map coalesce is configurable with this
-  integration's current privileges, or would require a privilege change
-  weighed against ADR 0004's least-privilege stance. Blocked by the
-  `sys_dictionary` permission finding above; not resolved.
+- ~~Whether ServiceNow Table API `POST` responses are visible to an
+  immediate subsequent `GET` (read-after-write consistency)~~ -
+  **resolved this round:** yes, observed reliably in §3b's concurrency
+  experiment (both newly-created records were immediately visible to an
+  independent follow-up query).
+- **New, and now the most load-bearing open question:** *why* did
+  ServiceNow's admin-UI index-creation wizard accept a fully-configured
+  unique-index request and return success-shaped responses three
+  separate times without ever persisting a record (FL-0018)? Genuinely
+  unknown - could be a licensing gate, an async job this session didn't
+  wait for, or an instance quirk. This determines whether Candidate A
+  is actually infeasible here or just not yet achieved.
+- Whether Import Set + Transform Map coalesce is configurable in this
+  instance - **still not attempted.** This round investigated `sys_index`
+  instead (the mechanism actually surfaced by inspecting the schema
+  directly), not Import Sets/Transform Maps; that documented pattern
+  remains a completely separate, unverified path to the same goal.
 - What upstream (Salesforce-side) publishing contract will actually
   govern `Correlation_Id__c` stability across retries in production -
   this project has only ever been its own publisher via test scripts; the
   real Salesforce automation that would trigger
   `DistributorOnboardingRequested` doesn't exist yet. A genuine open
-  dependency, not just an untested detail.
+  dependency, not just an untested detail, and not specific to
+  ServiceNow - any correlation-keyed approach (A, B, or C) needs it.
 - Whether `ManagedSubscribe`'s open-beta status and support posture are
   acceptable for this project's purposes - not researched beyond the
   proto's own comments.
@@ -336,26 +431,33 @@ FL-0017, independent of whichever of A/C is eventually chosen here.
 
 ## 7. Recommendation: smallest next experiment to discriminate between the strongest candidates
 
-Not selecting an architecture. Candidates A and C both fully address
-every demonstrated failure; B is a cheap partial mitigation; D is
-orthogonal to this problem entirely. The question actually blocking a
-choice between A and C is the one this investigation could not resolve
-itself: **does this integration's current (or a reasonably adjusted)
-ServiceNow privilege level realistically support a target-side uniqueness
-guarantee, or is integration-owned durable state (C) the only fully
-achievable option without renegotiating ADR 0004's access model?**
+**Still not selecting an architecture.** This round's evidence shifted
+the picture - it did not fully discriminate between A and C. The
+concurrency experiment (§3b) conclusively shows the unconstrained
+configuration fails, which is real, useful evidence, but it does not
+prove ServiceNow *can't* enforce this - only that this session's
+attempts to make it enforce it, across three well-formed tries with
+genuine admin access, didn't work, for a reason that was never
+explained (FL-0018). Writing an ADR for Candidate C now would mean
+choosing it mainly by elimination, on the strength of one unresolved,
+instance-specific UI obstacle rather than a confirmed platform
+limitation. Per the same discipline this investigation has applied
+throughout, that gap is not yet enough to justify a decision.
 
-**Recommended smallest next experiment:** investigate, without
-implementing, whether Import Set + Transform Map coalesce (or any other
-ServiceNow-native uniqueness mechanism) is configurable by a user with
-the same or only slightly elevated privileges as the current `itil`-role
-integration user - concretely, have someone with ServiceNow admin access
-check `sys_dictionary` for the Incident table (or a candidate staging
-table) and report what unique-constraint options actually exist, rather
-than continuing to reason about it from documentation alone. This is
-smaller than prototyping either full candidate, and its answer directly
-determines whether the eventual decision is "A vs. C" or simply "C" by
-elimination.
+**Recommended smallest next experiment:** resolve *why* §3a's index
+creation attempts didn't persist, before doing anything larger -
+concretely, either (a) consult ServiceNow's own support/documentation
+channel for this specific symptom (a `200`-status "Database Indexes"
+wizard submission that never results in a persisted `sys_index` record),
+or (b) retry the same steps after allowing for a longer wait (in case
+it's an asynchronous background job rather than a synchronous rejection)
+and checking ServiceNow's system logs (`syslog`) for any server-side
+trace of the attempt that the UI itself didn't surface. This is smaller
+than either remaining larger step - prototyping Candidate C's durable
+store, or attempting the separate, unverified Import Set + coalesce path
+- and its answer is the one thing that would most directly resolve
+whether Candidate A remains a live option at all, rather than continuing
+to weigh it against C on incomplete information.
 
 ---
 
@@ -368,3 +470,14 @@ this investigation's own instructions, manufacturing a decision ahead of
 that evidence would violate the same discipline this project has applied
 throughout (`CLAUDE.md`: "Do not manufacture alternatives merely to make
 an ADR appear sophisticated").
+
+This round added two artifacts that are investigation tooling, not
+implementation: the custom field `u_gv_business_operation_id` on
+ServiceNow's Incident table (created live in the ServiceNow instance,
+per this round's explicit permission to do so for the experiment - not
+referenced by any runtime code, e.g. `incidentAdapter.ts`), and
+`scripts/test-servicenow-concurrent-idempotency.ts` (a standalone
+experiment script, following this project's existing pattern of
+investigation-only scripts like `detect-unprocessed-events.ts` - not
+wired into the subscriber or any runtime path). The Salesforce
+subscriber (`pubsubClient.ts`, `checkpoint.ts`) was not modified.

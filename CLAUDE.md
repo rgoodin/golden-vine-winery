@@ -59,13 +59,27 @@ state, and Salesforce's `ManagedSubscribe`/`CommitReplay` (read directly
 from the proto: it's explicit open beta and only ever addresses the
 replay/checkpoint problem, never the side-effect atomicity one) against
 every failure mode reproduced so far. Two candidates fully cover the
-demonstrated failures on paper; the evidence doesn't yet discriminate
-between them (one needs ServiceNow admin privileges this project's
-deliberately least-privileged integration user doesn't have and couldn't
-even use to check `sys_dictionary`). No architecture was chosen, no ADR
-was written — the spike's own recommended next step (get a human with
-ServiceNow admin access to check what uniqueness mechanisms are actually
-configurable) is proposed, not done.
+demonstrated failures on paper; the evidence doesn't yet fully
+discriminate between them. **A focused follow-up then did exactly what
+the spike recommended** — a human admin session (not the deliberately
+least-privileged `itil` integration user) investigated ServiceNow's
+actual uniqueness mechanisms, and a genuine **concurrency** experiment
+(two simultaneous create requests via `Promise.all`, not
+lookup-then-create) was run against a dedicated test field. Result: with
+no enforced constraint in place, both concurrent requests succeeded —
+two Incidents were created for one business operation (OB-0014),
+directly confirming the failure mode is real. Getting an actual
+platform-enforced unique index working turned out to be its own
+unresolved obstacle: three well-formed attempts via ServiceNow's own
+index-creation UI all returned success-shaped responses without ever
+persisting a constraint, for a reason that was never explained
+(FL-0018). This weakens target-side idempotency's near-term
+attractiveness without eliminating it, and still doesn't fully
+discriminate between it and integration-owned durable state — see
+`docs/architecture/0001-reliability-architecture-spike.md` §7 for the
+updated recommendation (resolve why index creation silently failed,
+rather than jumping to build either candidate). Still no architecture
+chosen, no ADR written.
 
 Also proposed but deliberately not built: giving the audit tool its own
 incremental "last audited position" so repeat runs don't always re-sweep

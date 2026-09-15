@@ -110,6 +110,15 @@ package (premature until a second integration needs the same thing — see
   Validated against the complete known event history with zero
   discrepancies (see FL-0017, OB-0011, OB-0012, LL-0010, LL-0011).
   Experimental/audit only - not run automatically.
+- `scripts/test-servicenow-concurrent-idempotency.ts` — controlled
+  concurrency experiment for the ServiceNow target-side idempotency
+  investigation: fires two Incident-create requests for the same
+  business-operation ID via `Promise.all` (genuinely concurrent, not
+  lookup-then-create) against `u_gv_business_operation_id`, then
+  independently re-queries ServiceNow to see how many Incidents actually
+  resulted. Result and analysis: FL-0018, OB-0014,
+  `docs/architecture/0001-reliability-architecture-spike.md` §3b.
+  Experimental only - does not touch the subscriber or `incidentAdapter.ts`.
 - `EXPERIMENT_CRASH_BEFORE_CHECKPOINT=true npm run dev` — deterministic
   test-only crash point in `pubsubClient.ts`: exits right after an event
   is successfully processed but before its checkpoint is persisted, for
@@ -141,11 +150,17 @@ and
   reliability architecture spike
   ([`docs/architecture/0001-reliability-architecture-spike.md`](../../docs/architecture/0001-reliability-architecture-spike.md))
   investigated four candidate fixes against every demonstrated failure
-  mode, but **no architecture has been chosen and no fix has been
-  built** - the evidence doesn't yet discriminate between the two
-  strongest candidates. The spike's own recommended next step (check what
-  ServiceNow-side uniqueness mechanisms are actually configurable with
-  this integration's privileges) is proposed, not done.
+  mode, followed by a focused ServiceNow concurrency experiment
+  (`scripts/test-servicenow-concurrent-idempotency.ts`): with no
+  enforced uniqueness constraint, two simultaneous create requests for
+  the same business operation both succeeded, producing two Incidents -
+  confirming the failure mode is real. Getting ServiceNow to actually
+  enforce a unique index was attempted (with real admin access, not by
+  expanding the integration's own `itil` credentials) and proved
+  inconclusive - three well-formed attempts returned success-shaped
+  responses without ever persisting a constraint. **No architecture has
+  been chosen and no fix has been built** - see the spike doc's §7 for
+  the current recommended next step.
 - Giving the audit tool its own incremental "last audited position" so
   repeat runs don't always re-sweep from `EARLIEST` (LL-0011) - proposed,
   not built.

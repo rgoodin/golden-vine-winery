@@ -544,6 +544,90 @@ than deciding whether/how to run it automatically.
 
 ---
 
+### LL-0012: A field that *could* carry a business identity is not the same as a platform that *enforces* its uniqueness — and a checkpoint guarantee is not the same as a business-effect guarantee
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Evidence:** FL-0018, OB-0014, OB-0015
+
+**Lesson:** This round set out to answer one narrow, important question:
+can ServiceNow itself guarantee that two requests for the same business
+operation can't both create an Incident? The honest answer, from direct
+experiment rather than documentation or assumption, is **no — not in
+this instance's current configuration.** `u_gv_business_operation_id`
+was created specifically for this test (a permitted, dedicated custom
+field, per this round's instructions — see the architecture spike doc
+for its exact configuration), and two genuinely concurrent create
+requests for the same value both succeeded, producing two Incidents
+(OB-0014). Getting a real platform-enforced unique index in place proved
+to be its own unresolved obstacle (FL-0018): the admin UI accepted the
+configuration and returned success-shaped responses three separate ways,
+without ever producing a persisted constraint. Neither of those facts
+was assumed going in — both came from directly trying it.
+
+That distinction matters beyond this one experiment: **storing an
+identifier somewhere queryable and having the platform enforce its
+uniqueness are two different claims**, and conflating them is exactly
+the trap this round's instructions were designed to avoid (the same
+trap as "request 1 creates, request 2 looks up and finds it" — that
+proves *our* code can look before writing, not that the *platform*
+prevents the race). The same shape of mistake was already named once
+this project, from a different angle, in the reliability spike (OB-0013):
+Salesforce's `ManagedSubscribe`/`CommitReplay` looked, by name and
+timing, like it might be *the* answer to this project's duplicate/loss
+problem — until reading `pubsub_api.proto` directly showed
+`CommitReplayRequest` carries only a replay position, nothing about
+whether a downstream side effect happened. `ManagedSubscribe` didn't
+become the answer merely because it's newer technology; the proto told
+us what it actually commits. This round's finding is the same lesson
+from the ServiceNow side: an available field, or a wizard that reports
+success, is not evidence of an enforced guarantee — only exercising the
+actual guarantee (concurrently, adversarially) is.
+
+**Separately, and not resolved by this round:** even if ServiceNow *did*
+enforce uniqueness on some identifier, `Correlation_Id__c` (the existing
+Salesforce-side field) can only serve as that identifier if its
+producer follows a stability/uniqueness contract that doesn't currently
+exist anywhere in this project — nothing today prevents the same
+business event from being republished under a different
+`Correlation_Id__c`, or the same ID from being reused for a different
+event. This is a real upstream dependency for *any* correlation-based
+approach (target-side idempotency, lookup-before-create, or an
+integration-owned idempotency key all need a trustworthy identifier from
+somewhere), not something specific to ServiceNow. Designing that
+publishing contract is out of scope for this round, per instruction, and
+is recorded here as a named, open dependency rather than left implicit.
+
+**Comparing against the architecture spike's candidates (docs/architecture/0001-reliability-architecture-spike.md §4):**
+
+- **Candidate A (target-side idempotency):** this round's evidence
+  *weakens* its near-term attractiveness relative to how the spike left
+  it. It was the strongest candidate *if* achievable, precisely because
+  the atomicity boundary would live in the same system producing the
+  business side effect. That "if" is now carrying more weight than the
+  spike could know: the null-hypothesis experiment confirms the failure
+  mode is real and current, and getting the enforcement mechanism itself
+  working turned out to be its own unresolved obstacle, not a
+  configuration checkbox away.
+- **Candidate C (integration-owned durable processing state):** unchanged
+  by this round — still the candidate that covers every demonstrated
+  failure mode on paper, still the largest net-new build. This round's
+  findings don't add evidence *for* it directly; they remove some of the
+  ground out from under its strongest competitor.
+
+**Implication:** The evidence has shifted, not fully discriminated.
+Candidate A is no longer clearly "the strongest candidate if achievable"
+without a real answer to *why* index creation silently failed in this
+instance — that unresolved obstacle (FL-0018) is now the load-bearing
+open question, more than the original "we don't know" was. Writing an
+ADR now would mean choosing Candidate C mainly by elimination, on the
+strength of one inconclusive instance-specific UI obstacle rather than a
+confirmed platform limitation. That's not yet enough. See the
+architecture spike document for the specific next experiment this
+recommends instead of an ADR.
+
+---
+
 ## Recommended smallest Phase 3 Enablement experiment (not started)
 
 The prior recommendation (extend the detector to catch duplicates, not

@@ -685,4 +685,70 @@ written for the same reason.
 
 ---
 
+### OB-0014: Concurrency experiment — two simultaneous requests for the same business operation both succeeded, producing two Incidents
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Category:** experiment / reliability
+
+The spike (OB-0013) recommended checking whether ServiceNow can actually
+enforce a uniqueness invariant, not just support a lookup-before-create
+pattern. Ran the smallest controlled version of that test:
+`scripts/test-servicenow-concurrent-idempotency.ts` generates one
+business-operation ID, then fires **two Incident-create `POST` requests
+concurrently via `Promise.all`** (not sequentially, and not
+lookup-then-create) against `/api/now/table/incident`, using the
+existing `itil`-role OAuth credentials from `.env` — no privilege change.
+
+**Result:** both requests received `201 Created`. Both succeeded.
+ServiceNow created **two separate Incidents** (`INC0010009`,
+`INC0010010`) carrying the identical `u_gv_business_operation_id`.
+Neither caller was rejected, rate-limited, or told about the other's
+request — each received a full, ordinary success response as if it were
+the only request in flight. A follow-up independent query
+(`GET` filtered on that business-operation ID) confirmed both records
+exist.
+
+This is the direct, concrete counterexample to "ServiceNow enforces
+this" for the current configuration: no unique index is actually in
+place on `u_gv_business_operation_id` (FL-0018 — attempts to create one
+did not result in a persisted constraint), so this result answers the
+narrower question "what happens today, with no enforced constraint" (the
+null hypothesis) rather than the broader question "can ServiceNow ever
+enforce this" (still open per FL-0018). Both questions matter and are
+kept distinct in `docs/architecture/0001-reliability-architecture-spike.md`.
+
+---
+
+### OB-0015: The `itil` integration account's privilege gap and ServiceNow admin access are two different platform-ownership concerns
+
+**Date:** 2026-09-15
+**Phase:** Phase 1 — Developer Experience
+**Category:** platform / enterprise-integration
+
+OB-0013 already noted the `itil`-role integration user (ADR 0004) can't
+query `sys_dictionary` ("Insufficient rights to query records"). This
+round required an actual answer to the schema question, so a separate,
+human-authenticated ServiceNow admin browser session was used instead —
+deliberately, per this round's explicit instruction not to expand the
+`itil` account's runtime privileges just to conduct research.
+
+Worth naming as its own observation, not just a blocker to work around:
+this is a second, legitimate instance of a pattern real enterprise
+integration teams hit constantly. **Runtime least privilege (what the
+integration's service account can do in production) and
+platform-development/admin privileges (what's needed to design or
+inspect schema, indexes, or configuration) are different concerns with
+different intended owners** — a dedicated `itil` user is the right
+runtime choice (ADR 0004 was not wrong), but nothing about that choice
+was ever meant to also serve platform-administration needs, and treating
+the two as one role is itself a common real-world misconfiguration this
+project's ADR 0004 avoided by accident more than by naming the
+distinction outright. This may eventually matter for what the Golden
+Path needs to document about platform ownership and environment setup —
+noted here rather than acted on, since no Golden Path work is in scope
+yet.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->
