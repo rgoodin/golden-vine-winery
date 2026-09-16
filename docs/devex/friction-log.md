@@ -1033,4 +1033,49 @@ document for the full comparison against Candidate C.
 
 ---
 
+### FL-0020: Testing staleness-based reclaim honestly requires real elapsed time, not a mocked clock
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Developer Experience
+
+#### Observation
+
+Building `reclaim()`'s test (`scripts/test-durable-state-reclaim-ambiguity.ts`,
+OB-0020) required making a record genuinely stale - old enough that
+`acquired_at < cutoff` would be true - to test the reclaim path for
+real, not by construction.
+
+#### Friction
+
+The straightforward options were both worth naming rather than picking
+silently: (a) mock/fake the system clock so `acquired_at` and the
+reclaim check disagree without any real delay, or (b) actually wait.
+Mocking risks quietly testing the mock instead of the real staleness
+check (a wrong clock-mocking setup can make a broken comparison look
+correct, or vice versa) - a real concern for a project whose whole
+premise is not trusting assumptions. Chose (b): a real 2.5-second
+`sleep()` against a 2-second staleness threshold, so the elapsed time
+in the test is the same kind of elapsed time a real crash-then-retry
+would produce.
+
+#### Impact
+
+Small and one-time here (adds ~2.5 seconds to one script's run), but
+worth recording as a real tradeoff: a future reclaim mechanism with a
+realistic staleness window (minutes, not seconds) would make this
+honest-clock approach impractical for fast test iteration, and would
+need either a real clock abstraction (dependency-injected "now," not a
+global mock) or accept slow tests - a decision this prototype didn't
+have to make yet because its window was small.
+
+#### Possible Enablement
+
+Not decided, and not needed yet - this project's staleness windows so
+far are test-only, seconds-scale values, not production tuning. If a
+real reclaim policy is ever built, its own tests will need to decide
+this deliberately rather than default to whatever happened to work
+here.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

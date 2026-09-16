@@ -95,10 +95,25 @@ both directly rather than continuing to reason from documentation:
    narrower evidence than before, still not a definitive answer
    (FL-0018, OB-0019). Per instruction, Candidate C's reclaim design was
    explicitly not touched this round.
+5. **A fifth, same-day follow-up (bounded to Candidate C only — A left
+   untouched, pending external ServiceNow input) tested whether a stale
+   `in_flight` record can be safely reclaimed.** Extended the prototype
+   by exactly one function, `reclaim()` — an atomic elapsed-time check,
+   not a lease/heartbeat framework — then produced two crashed
+   operations with an *identical* durable-record shape via different
+   real paths (one that never called ServiceNow, one where ServiceNow
+   genuinely succeeded first). Result: staleness-based reclaim recovers
+   the genuinely-abandoned one correctly (exactly one Incident), but
+   reintroduces a duplicate for the one that already succeeded — proving
+   elapsed time alone cannot distinguish "abandoned" from "succeeded but
+   not recorded" (OB-0020). The smallest fix identified (querying
+   ServiceNow directly during reclaim) was reasoned through but
+   deliberately not built (LL-0015).
 
 On experimentally established facts alone, only Candidate C has ever
-been shown to enforce the core invariant — but with a confirmed,
-unaddressed hole, so that's not enough to choose it either (LL-0014).
+been shown to enforce the core invariant, and its own necessary
+follow-up fix (reclaim) is now shown to be necessary but not
+sufficient — so that's still not enough to choose it (LL-0014, LL-0015).
 Both candidates now have a specific, named, unresolved blocker rather
 than a vague "needs more investigation" — see
 `docs/architecture/0001-reliability-architecture-spike.md` §7 for both.

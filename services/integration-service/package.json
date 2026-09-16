@@ -14,7 +14,8 @@
     "detect-unprocessed-events": "ts-node scripts/detect-unprocessed-events.ts",
     "test-servicenow-concurrent-idempotency": "ts-node scripts/test-servicenow-concurrent-idempotency.ts",
     "test-durable-state-concurrent-idempotency": "ts-node scripts/test-durable-state-concurrent-idempotency.ts",
-    "test-durable-state-crash-gap": "ts-node scripts/test-durable-state-crash-gap.ts"
+    "test-durable-state-crash-gap": "ts-node scripts/test-durable-state-crash-gap.ts",
+    "test-durable-state-reclaim-ambiguity": "ts-node scripts/test-durable-state-reclaim-ambiguity.ts"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.10.9",

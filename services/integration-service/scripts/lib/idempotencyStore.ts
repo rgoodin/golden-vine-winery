@@ -33,6 +33,12 @@ const { DatabaseSync } = require('node:sqlite') as { DatabaseSync: new (path: st
  * (docs/architecture/0001-reliability-architecture-spike.md Candidate B).
  * Instead every caller attempts the INSERT directly; the database engine's
  * own constraint, not application code, decides the single winner.
+ *
+ * Extended with `reclaim()` to investigate OB-0018's crash-gap failure
+ * mode (docs/devex/observations.md OB-0018) - the minimum state needed
+ * for a controlled stale-ownership experiment (an elapsed-time check on
+ * the existing `acquired_at` column), not a general lease/heartbeat
+ * framework.
  */
 
 export type IdempotencyStatus = 'in_flight' | 'completed';
@@ -92,6 +98,32 @@ export function acquire(db: SqliteDatabase, businessOperationId: string): boolea
     }
     throw err;
   }
+}
+
+/**
+ * Atomic, conditional reclaim of a stale 'in_flight' record - the minimum
+ * state needed to test staleness-based reclamation, nothing more (no
+ * lease ownership token, no heartbeat, no retry counter). A caller
+ * "reclaims" only if the row is still 'in_flight' AND its acquired_at is
+ * older than staleAfterMs; both checks happen inside the single UPDATE's
+ * WHERE clause, so the database engine - not a prior read - decides
+ * whether this call's reclaim actually took effect (`changes > 0`). This
+ * is the same "constraint decides, not a read" principle as `acquire`,
+ * applied to reclaiming instead of first creation.
+ *
+ * Deliberately does NOT attempt to distinguish "genuinely still being
+ * processed" from "crashed before completing" beyond elapsed time - that
+ * is exactly the question this experiment tests, not something this
+ * function assumes an answer to.
+ */
+export function reclaim(db: SqliteDatabase, businessOperationId: string, staleAfterMs: number): boolean {
+  const cutoff = new Date(Date.now() - staleAfterMs).toISOString();
+  const result = db
+    .prepare(
+      'UPDATE idempotency_keys SET acquired_at = ? WHERE business_operation_id = ? AND status = ? AND acquired_at < ?'
+    )
+    .run(new Date().toISOString(), businessOperationId, 'in_flight', cutoff);
+  return Number(result.changes) > 0;
 }
 
 export function markCompleted(

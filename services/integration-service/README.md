@@ -133,6 +133,20 @@ package (premature until a second integration needs the same thing — see
   file. Full analysis:
   `docs/architecture/0001-reliability-architecture-spike.md` §4
   ("C-prototype"), `docs/devex/lessons-learned.md` LL-0013.
+- `scripts/test-durable-state-reclaim-ambiguity.ts` — direct follow-up:
+  can a stale `in_flight` record from the crash-gap experiment above be
+  safely reclaimed? Adds one function to `idempotencyStore.ts`,
+  `reclaim()` (an atomic, conditional elapsed-time check - not a
+  lease/heartbeat framework), then produces two crashed operations with
+  an *identical* durable-record shape via two different real paths (one
+  that never called ServiceNow, one where ServiceNow genuinely succeeded
+  before the crash) and reclaims both the same way. Result: the
+  genuinely-abandoned one recovers correctly (exactly one Incident); the
+  one where ServiceNow already succeeded gets a second, duplicate
+  Incident from the naive retry - confirming elapsed time alone cannot
+  distinguish the two cases (OB-0020). Full analysis:
+  `docs/architecture/0001-reliability-architecture-spike.md` §4
+  ("C-reclaim"), `docs/devex/lessons-learned.md` LL-0015.
 - `EXPERIMENT_CRASH_BEFORE_CHECKPOINT=true npm run dev` — deterministic
   test-only crash point in `pubsubClient.ts`: exits right after an event
   is successfully processed but before its checkpoint is persisted, for
@@ -171,15 +185,23 @@ and
   confirming the failure mode is real. Getting ServiceNow to actually
   enforce a unique index was attempted repeatedly, including with real
   elevated admin access and after removing a duplicate-data blocker the
-  platform itself flagged, and remains unresolved - see FL-0018. A
+  platform itself flagged. Its raw manual-insert path is now confirmed
+  permanently blocked by a platform Access Control (role `nobody`); the
+  officially supported "Database Indexes" wizard remains unexplained
+  after five separate attempts ruled out privilege, dirty data, the
+  uniqueness flag, and table complexity as the cause - see FL-0018. A
   matching prototype of the integration-owned durable-state candidate
-  (`scripts/lib/idempotencyStore.ts`) then showed the opposite mix: its
-  core duplicate-prevention mechanism works cleanly (5/5 trials), but a
-  crash between acquiring ownership and calling ServiceNow causes
-  permanent silent loss, with no reclaim mechanism designed or built
-  yet (OB-0017, OB-0018). **No architecture has been chosen and no fix
-  has been built** - see the spike doc's §7 for the current recommended
-  next step for each candidate.
+  (`scripts/lib/idempotencyStore.ts`) showed the opposite mix: its core
+  duplicate-prevention mechanism works cleanly (5/5 trials - OB-0017),
+  but a crash between acquiring ownership and calling ServiceNow causes
+  permanent silent loss (OB-0018). A direct follow-up tested the obvious
+  fix - staleness-based reclaim - and found it **necessary but not
+  sufficient**: it recovers a genuinely abandoned operation correctly,
+  but reintroduces a duplicate Incident whenever the crash happened
+  *after* ServiceNow already succeeded, because elapsed time alone
+  cannot tell those two cases apart (OB-0020). **No architecture has
+  been chosen and no fix has been built** - see the spike doc's §7 for
+  the current recommended next step for each candidate.
 - Giving the audit tool its own incremental "last audited position" so
   repeat runs don't always re-sweep from `EARLIEST` (LL-0011) - proposed,
   not built.

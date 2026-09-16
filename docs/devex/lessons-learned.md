@@ -783,6 +783,78 @@ either.
 
 ---
 
+### LL-0015: A durable "ownership" record and a durable "did the effect actually happen" record are two different facts, and this project has only ever built the first one
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Developer Experience
+**Evidence:** OB-0018, OB-0020
+
+**Lesson:** LL-0014 treated Candidate C's crash-gap failure (OB-0018) as
+an open question - "what staleness/reclaim policy would correctly
+resolve it?" This round answered a narrower, more useful version of
+that question first: **can elapsed time alone tell the difference
+between "this was abandoned and never ran" and "this ran and succeeded,
+but that success was never durably recorded"?** Tested directly
+(OB-0020), not assumed: no. A record that only stores *who owns this
+business operation and since when* cannot answer *did the owned
+operation's external side effect actually happen*, because both crash
+boundaries produce the exact same record. Reclaiming safely for Case 1
+and reclaiming unsafely for Case 2 are, from the store's own point of
+view, the identical action - the distinction only exists in the world
+outside the store, on ServiceNow's own database.
+
+This sharpens something LL-0009 already established in a different
+shape: **checkpointing "I own this" and recording "the external effect
+committed" are two separable facts, and conflating them is exactly what
+produces a silent-loss-shaped or duplicate-shaped hole**, regardless of
+which layer (Salesforce replay checkpoint, or this durable-state store)
+does the conflating. `acquire()`/`in_flight` answers "should I be the
+one processing this." Only `markCompleted()` answers "did it happen" -
+and that write is exactly the one a crash can prevent from ever
+occurring, no matter how the ownership half of the record is designed.
+No amount of tuning the staleness *window* fixes this, because the
+window only controls *when* an unsafe reclaim is attempted, not
+*whether* it's unsafe once attempted.
+
+**Investigated, not implemented, per instruction - the smallest
+additional evidence that could resolve the ambiguity:** query ServiceNow
+directly by the business-operation identifier (`u_gv_business_operation_id`)
+as part of the reclaim path itself, before deciding whether to call
+ServiceNow again. If a matching Incident already exists, treat the
+operation as completed (backfill `markCompleted()` from what's found,
+no new create); only create if genuinely absent. This is **target
+reconciliation**, not a new idea for this project - it's the same shape
+as the existing audit tool
+(`scripts/detect-unprocessed-events.ts`), narrowed from "sweep
+everything periodically" to "check one specific ID at the one moment a
+reclaim is about to act on it."
+
+**Why this isn't simply Candidate B's already-rejected
+lookup-before-create, despite querying before writing:** the original
+objection to lookup-before-create (docs/architecture/0001-reliability-architecture-spike.md
+Candidate B) was that the lookup and the write aren't atomic with
+respect to *each other* - a second concurrent caller can slip through
+the same gap (exactly what OB-0014 demonstrated against ServiceNow
+directly). Here, `reclaim()`'s own atomic `UPDATE ... WHERE` has already
+ensured only one caller can be mid-reclaim for a given business-operation
+ID at a time (OB-0017's mechanism, reused) - a reconciliation query
+inserted after a successful reclaim is not racing another reclaimer for
+the same ID, only checking a fact about the past. The genuine remaining
+edge case - the "crash" is actually just a very slow in-progress
+request, not a real crash, and it completes its own ServiceNow call and
+`markCompleted()` at some point after the reclaim's reconciliation query
+already ran and found nothing - is a real, named gap this reasoning
+does not resolve, and would need its own test before being trusted, not
+before being built.
+
+**Not built:** this reconciliation step is not implemented in
+`scripts/lib/idempotencyStore.ts` or elsewhere, per instruction - OB-0020's
+experiment already answered what it set out to answer without it. It is
+recorded here as the specific next mechanism to test if Candidate C is
+pursued further, not as something already validated.
+
+---
+
 ## Recommended smallest Phase 3 Enablement experiment (not started)
 
 The prior recommendation (extend the detector to catch duplicates, not

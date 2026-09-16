@@ -945,4 +945,55 @@ rerun a third time.
 
 ---
 
+### OB-0020: Staleness-based reclaim is safe for one crash boundary and unsafe for the other — and the durable record cannot tell them apart on its own
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Developer Experience
+**Category:** experiment / reliability
+
+Direct follow-up to OB-0018's confirmed permanent-loss failure mode.
+Question: can a stale `in_flight` record be safely reclaimed after a
+crash, without reintroducing OB-0014's duplicate? Extended
+`scripts/lib/idempotencyStore.ts` with exactly one new function,
+`reclaim()` - an atomic, conditional `UPDATE ... WHERE status='in_flight'
+AND acquired_at < cutoff`, the same "constraint decides, not a prior
+read" principle as `acquire()`. No lease token, no heartbeat, no retry
+framework.
+
+`scripts/test-durable-state-reclaim-ambiguity.ts` produced two crashed
+operations that reach **identical durable-record shape**
+(`status=in_flight`, no incident recorded, no completion timestamp) by
+two different real paths: Case 1 crashes before ever calling ServiceNow;
+Case 2 calls ServiceNow for real (a genuine Incident is created), then
+crashes before recording completion. Printed both records side by side
+and confirmed they differ only in `businessOperationId`/`acquiredAt` -
+nothing in the record itself reveals which case actually happened.
+
+After a real 2.5-second wait (elapsed time, not simulated), both records
+reclaimed successfully (`reclaim()` returned `true` for both). Reclaim
+followed by a retried ServiceNow create, independently verified via a
+fresh Table API query for each business-operation ID:
+
+- **Case 1: exactly 1 Incident.** Reclaiming a genuinely abandoned
+  operation and completing it worked correctly, exactly once.
+- **Case 2: exactly 2 Incidents** - the original, real one from before
+  the simulated crash, plus a second one from the naive retry.
+  **Naive staleness-based reclaim reintroduced OB-0014's duplicate
+  failure exactly as hypothesized**, not merely as a theoretical risk.
+
+**Answer to the question this experiment set out to answer: elapsed
+time can determine that an operation has been abandoned, but it cannot
+determine whether the abandoned attempt already succeeded.** Those are
+two different questions, and the durable record as currently modeled
+only ever answers the first one. This was demonstrated, not assumed -
+both crash paths were actually run, both durable records were actually
+compared, and both outcomes were independently confirmed against real
+ServiceNow data, not trusted from local state.
+
+No workaround beyond the bare elapsed-time check was implemented, per
+instruction - the duplicate in Case 2 was observed and reported, not
+suppressed or explained away.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

@@ -95,9 +95,13 @@ restriction) while the officially supported path remains unexplained
 after ruling out every plausible cause. Against a minimal prototype of
 an integration-owned durable-state store, the same test came back clean
 5/5 times - but simulating a crash mid-operation revealed it trades that
-win for a different failure: permanent silent loss, with no recovery
-mechanism designed yet. Both candidates now have a specific, unresolved
-blocker; no architecture has been chosen.
+win for a different failure: permanent silent loss. A follow-up tested
+the obvious fix - reclaiming a stale record after a timeout - and found
+it recovers a genuinely abandoned operation correctly, but creates a
+duplicate Incident if the crash actually happened after ServiceNow had
+already succeeded, because elapsed time alone can't tell those two
+cases apart. Both candidates now have a specific, unresolved blocker;
+no architecture has been chosen.
 
 See [`CLAUDE.md`](./CLAUDE.md) ("Current Repository State") for the
 up-to-date summary,
