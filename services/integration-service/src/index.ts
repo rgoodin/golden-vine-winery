@@ -1,6 +1,6 @@
 import { config } from './config';
 import { subscribeToDistributorOnboardingEvents } from './salesforce/subscriber';
-import { createOnboardingIncident } from './servicenow/incidentAdapter';
+import { processDistributorOnboardingEvent } from './processDistributorOnboardingEvent';
 
 async function main() {
   console.log('Golden Vine integration service starting...');
@@ -8,9 +8,7 @@ async function main() {
 
   await subscribeToDistributorOnboardingEvents(async (event) => {
     console.log('Received DistributorOnboardingRequested event:', event);
-
-    const incident = await createOnboardingIncident(event);
-    console.log(`Created ServiceNow Incident ${incident.number} (${incident.sysId})`);
+    await processDistributorOnboardingEvent(event);
   });
 }
 

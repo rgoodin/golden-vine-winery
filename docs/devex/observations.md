@@ -1224,4 +1224,62 @@ here.
 
 ---
 
+### OB-0025: Tier 1 wired into the real service — normal processing and concurrent-initial-processing protection both confirmed against the actual production code path
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0005, Tier 1)
+**Category:** implementation / verification
+
+First Enablement-phase implementation of ADR 0005's Tier 1 baseline:
+`src/reliability/idempotencyStore.ts` (a production-shaped extraction
+of the mechanism validated experimentally in
+`scripts/lib/idempotencyStore.ts` - `acquire`/`complete` only, no
+`reclaim`, per this round's explicit scope) and
+`src/processDistributorOnboardingEvent.ts` (the atomic-acquire →
+ServiceNow-create → record-completion path from the ADR's diagram),
+now called by `src/index.ts` for every real event. This is not another
+architectural finding - it is a check of whether what OB-0014 through
+OB-0023 proved experimentally still holds once moved into the real,
+running service, driven by the actual Salesforce → ServiceNow path
+rather than a synthetic harness.
+
+**Normal processing, verified end-to-end against real systems:**
+started the real subscriber (`npm run dev`), published one fresh test
+event, and confirmed: the event was received and processed through the
+new gate; exactly one Incident was created in ServiceNow, independently
+verified via `verify-recent-incidents.ts` (not trusted from the
+subscriber's own log); the local `.idempotency.sqlite` record
+independently showed `status: completed` with the matching `sys_id`/
+`number`; and the replay checkpoint was saved immediately afterward, as
+before.
+
+**Concurrent initial-processing protection, verified through the real
+processing function, not just the extracted store:**
+`scripts/test-production-concurrent-idempotency.ts` calls the exact
+function `src/index.ts` calls - `processDistributorOnboardingEvent()` -
+twice concurrently via `Promise.all`, for two synthetic deliveries
+(distinct Salesforce event IDs) of the same business-operation ID.
+Result: exactly one delivery created an Incident, the other was
+correctly rejected as already-owned; independently verified against
+ServiceNow (by `correlation_id`, the field `incidentAdapter.ts` has
+always used and which this round left unchanged) - exactly one
+Incident exists. The production extraction preserves OB-0017's proven
+property.
+
+**Replay/checkpoint behavior confirmed unregressed:** stopped and
+restarted the real subscriber after processing the fresh event above;
+it resumed with `ReplayPreset.CUSTOM` from the newly-saved checkpoint
+(not `LATEST`, not the stale pre-existing one), and did not reprocess
+the already-checkpointed event - matching the behavior established in
+OB-0008/FL-0014, unaffected by this round's change (`pubsubClient.ts`
+and `checkpoint.ts` were not modified).
+
+**What this round deliberately did not test or build, per ADR 0005's
+explicit scope:** stale-operation recovery (reclaim), scheduled/
+automatic auditing, and genuine multi-process concurrency at the real
+entry point (see FL-0022 for why the latter specifically was not
+attempted this round, and what would need to change first).
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

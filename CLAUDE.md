@@ -81,17 +81,37 @@ exactly-once external effects. Tier 2 (opt-in, earned per target):
 exactly-once external effects, only once a target is *proven* — by
 experiment, not documentation — to enforce uniqueness itself; ServiceNow
 has not earned it here. The Golden Vine integration today targets
-Tier 1 only. Nothing from the ADR has been implemented yet — its
-recommended first Enablement step is wiring the already-validated Tier 1
-mechanisms (ownership/reclaim/reconciliation, the audit tool on a real
-schedule) into the real service, not designing anything new.
+Tier 1 only.
+
+**Enablement has begun: Tier 1's normal processing path and concurrent-
+initial-processing protection are now wired into the real service.**
+`src/reliability/idempotencyStore.ts` (the production extraction of the
+validated `node:sqlite` durable-ownership mechanism — `acquire`/
+`complete`/`get`, keyed on `correlationId`, never `eventId`) and
+`src/processDistributorOnboardingEvent.ts` (the orchestration function
+`src/index.ts` now calls for every real event) replace the old direct
+event → ServiceNow path. Verified against real Salesforce and
+ServiceNow: normal processing, concurrent-delivery rejection (via the
+real function, `npm run test-production-concurrent-idempotency`), and
+checkpoint/replay resume across a restart — all independently confirmed
+against ServiceNow, not just local state (OB-0025). Reclaim, target
+reconciliation, and scheduled audit are **not** wired in yet — a crash
+between acquiring ownership and completing it currently leaves that one
+business operation stuck with no recovery, a known, deliberate gap
+(FL-0023) — and `reclaim()` was not carried over into the production
+store for that reason. The smallest next Tier 1 Enablement step is
+wiring a stale-operation recovery mechanism (reclaim + target
+reconciliation, both already validated experimentally — OB-0020,
+OB-0021) into the real service; not yet done.
 
 Also proposed but deliberately not built: giving the audit tool its own
 incremental "last audited position" so repeat runs don't always re-sweep
-from `EARLIEST` (LL-0011). Not yet built: Tier 1 itself (still
-experimental scripts, not wired into `src/`), any Tier 2 investigation,
-an automatic (rather than on-demand) detection trigger, and tests. See
-`services/integration-service/README.md` for current status.
+from `EARLIEST` (LL-0011). Not yet built: stale-operation recovery in
+production, any Tier 2 investigation, an automatic (rather than
+on-demand) detection trigger, and tests. See
+`services/integration-service/README.md` for current status and
+`docs/devex/dojo-perspectives.md` for what this Enablement round looked
+like from each DevEx Dojo role.
 
 A Salesforce Developer Edition org (External Client App, JWT Bearer Flow)
 and a ServiceNow Developer Instance (Client Credentials grant, dedicated
@@ -105,6 +125,7 @@ Commands (from `services/integration-service/`):
     npm run publish-test-event -- "Some Name"      # publish a test Salesforce event
     npm run build                                 # compile to dist/
     npm start                                      # run compiled output
+    npm run test-production-concurrent-idempotency # verify the durable-ownership gate via the real processing function
 
 There is no lint or test tooling yet — do not invent commands for either.
 No other services exist yet. When more are added, or lint/test tooling is

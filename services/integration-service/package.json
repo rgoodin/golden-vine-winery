@@ -18,7 +18,8 @@
     "test-durable-state-reclaim-ambiguity": "ts-node scripts/test-durable-state-reclaim-ambiguity.ts",
     "test-durable-state-reclaim-reconciliation": "ts-node scripts/test-durable-state-reclaim-reconciliation.ts",
     "test-durable-state-slow-worker-race": "ts-node scripts/test-durable-state-slow-worker-race.ts",
-    "test-servicenow-conditional-create": "ts-node scripts/test-servicenow-conditional-create.ts"
+    "test-servicenow-conditional-create": "ts-node scripts/test-servicenow-conditional-create.ts",
+    "test-production-concurrent-idempotency": "ts-node scripts/test-production-concurrent-idempotency.ts"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.10.9",

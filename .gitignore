@@ -27,6 +27,8 @@ npm-debug.log*
 .checkpoint.json
 .idempotency-experiment.sqlite
 .idempotency-experiment.sqlite-journal
+.idempotency.sqlite
+.idempotency.sqlite-journal
 
 # NOTE: add further language/tool-specific ignores (e.g. target/,
 # .terraform/) as more services/tooling are introduced.

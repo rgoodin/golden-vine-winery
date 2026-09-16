@@ -1130,4 +1130,112 @@ be worth extracting - premature to build from a single use.
 
 ---
 
+### FL-0022: `checkpoint.ts`'s single-instance assumption blocks testing genuine multi-process concurrency at the real entry point
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0005, Tier 1)
+
+#### Observation
+
+Wiring the durable-ownership gate into `src/index.ts` (ADR 0005's Tier 1)
+raised a testing question the architecture investigation's own scripts
+never had to answer: how do you exercise the *real* concurrent-initial-
+processing scenario - two independent subscriber instances racing to
+process the same broadcast Platform Event - through the actual
+production entry point, not a stand-in for it?
+
+#### Friction
+
+Running two real `npm run dev` processes side by side would be the
+literal answer, and Salesforce Pub/Sub delivery genuinely supports it
+(each independent `Subscribe()` stream receives its own copy of a
+published event - this is not competing-consumer/queue semantics). But
+`src/salesforce/checkpoint.ts` was never designed with more than one
+instance in mind: it reads and writes a single, shared
+`.checkpoint.json` file with no coordination between writers. Two
+instances started against the same checkpoint state would each save
+their own view of "the last processed position" to the same file,
+racing each other in a way that has nothing to do with the idempotency
+gate this round was actually trying to test - it would confound the
+result, not clarify it.
+
+#### Impact
+
+Chose not to test that way this round - instead, exercised the real
+`processDistributorOnboardingEvent()` function (the same function
+`src/index.ts` calls for every event) directly and concurrently from a
+script (`scripts/test-production-concurrent-idempotency.ts`),
+simulating two independent deliveries without needing two live
+subscriptions. This is a faithful test of the durable-ownership gate
+specifically, but it is not literally "two running copies of the
+service" - a gap between what was tested and what a future genuine
+multi-instance deployment would need to survive.
+
+#### Possible Enablement
+
+Not decided, and not needed for Tier 1 as currently scoped (this
+project runs one subscriber instance). If this integration - or any
+Golden Path integration built the same way - is ever expected to run
+more than one instance concurrently (horizontal scaling, or even just a
+brief overlap during a rolling redeploy), `checkpoint.ts`'s single-file,
+uncoordinated design would need to be revisited before that becomes
+safe. Not proposed as a specific fix here - just named as a real,
+previously-invisible limitation this round's testing needs surfaced.
+
+---
+
+### FL-0023: What should happen to the checkpoint when a delivery is correctly rejected, not processed?
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0005, Tier 1)
+
+#### Observation
+
+ADR 0005's processing diagram shows both branches - `acquired` and
+`already owned/completed` - converging on a single "checkpoint as
+appropriate" step, but doesn't spell out the mechanics: should
+`src/salesforce/pubsubClient.ts` still advance the Salesforce replay
+checkpoint for a delivery the durable-ownership gate correctly decided
+*not* to act on?
+
+#### Friction
+
+Getting this wrong in either direction has a real, different cost.
+Checkpoint forward regardless of the gate's decision, and a delivery
+that arrives *while its own earlier attempt is still `in_flight`*
+(e.g. a crash between `acquireOperation` and `completeOperation`, with
+no reclaim mechanism wired in yet - deliberately out of scope for this
+round) gets checkpointed past without ever completing - the business
+operation is silently stuck until a human intervenes, the same shape of
+loss as OB-0018, just narrowed to a smaller window (the gap between
+acquire and completion, not the whole processing step). Don't
+checkpoint forward, and *every* correctly-rejected duplicate delivery
+would leave the replay position stuck at that point forever, since
+nothing else ever advances it - Salesforce would redeliver the same
+already-decided event indefinitely, blocking all subsequent processing,
+not just the one business operation.
+
+#### Impact
+
+Resolved by not changing `pubsubClient.ts` at all: both branches in
+`processDistributorOnboardingEvent()` return normally without throwing,
+so the existing "checkpoint after `onEvent` resolves" behavior already
+does the right thing - advances past a correctly-rejected duplicate
+(no infinite redelivery loop), and only fails to advance past a
+delivery whose processing itself throws (unchanged from before this
+round). The narrower stuck-operation risk described above is a known,
+deliberate, already-documented consequence of deferring reclaim to a
+later Enablement step (see ADR 0005), not a new architectural gap this
+round introduced - but it was worth deriving explicitly rather than
+assuming the existing checkpoint behavior would "just work" without
+checking it against the new gate.
+
+#### Possible Enablement
+
+None yet - this is exactly the gap reclaim (the next Tier 1 Enablement
+step) exists to close. Recorded here so the reasoning doesn't need to
+be re-derived when that step is picked up.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

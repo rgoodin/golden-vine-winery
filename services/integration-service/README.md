@@ -39,9 +39,11 @@ Several known gaps were deliberately tested rather than assumed:
   result (OB-0012). Still an on-demand experimental/audit instrument, not
   wired into any runtime path.
 
-None of this is a production reliability feature — the checkpoint
-mechanism and the detector are both working experiments, and no
-architecture has been chosen yet.
+The checkpoint mechanism and the detector remain working experiments,
+not wired into any automatic schedule. The reliability *architecture*
+has since been decided and its baseline has begun being wired into the
+real service — see "What's deliberately not here yet" below and
+[ADR 0005](../../docs/decisions/0005-external-side-effect-reliability-contract.md).
 
 ## Stack
 
@@ -217,32 +219,63 @@ written from what actually happened (not idealized steps) —
 and
 [`docs/runbooks/servicenow-non-interactive-auth-setup.md`](../../docs/runbooks/servicenow-non-interactive-auth-setup.md).
 
-## What's deliberately not here yet
+## Reliability: what's wired in vs. what's not
 
-- A general retry / dead-letter / idempotency solution — root causes are
-  understood and both failure modes (duplicate, silent loss) are
-  reliably detectable via a validated diagnostic tool (FL-0011,
-  FL-0012, FL-0014–FL-0017, `docs/devex/lessons-learned.md` LL-0005,
-  LL-0006, LL-0008–LL-0011). A reliability architecture spike
-  ([`docs/architecture/0001-reliability-architecture-spike.md`](../../docs/architecture/0001-reliability-architecture-spike.md),
-  now RESOLVED) tested both strongest candidates directly across eight
-  follow-up rounds rather than reasoning about them: ServiceNow itself
-  never achieved a verified uniqueness-enforcement mechanism (FL-0018,
-  OB-0016, OB-0019, OB-0023 - including confirming no conditional-write
-  API exists to fall back on), and a `node:sqlite` durable-ownership
-  prototype (`scripts/lib/idempotencyStore.ts`) closes every reproduced
-  sequential crash boundary (OB-0017, OB-0021) but is defeated by a
-  genuinely concurrent "slow owner, not dead" race, confirmed with real
-  independent processes (OB-0022). **That investigation is now decided:
-  [ADR 0005](../../docs/decisions/0005-external-side-effect-reliability-contract.md)
-  adopts a two-tier reliability contract** - a mandatory baseline
-  (recoverable at-least-once processing paired with audit-based
-  detection of any residual gap/duplicate, not exactly-once) available
-  for any target, and an opt-in stronger guarantee (exactly-once
-  external effects) only for a target *proven* to enforce uniqueness
-  itself - which ServiceNow has not done here. **Nothing in the ADR has
-  been implemented** - the baseline mechanisms above remain experimental
-  scripts, not wired into `src/`.
+A reliability architecture spike
+([`docs/architecture/0001-reliability-architecture-spike.md`](../../docs/architecture/0001-reliability-architecture-spike.md),
+now RESOLVED) tested both strongest candidates directly across eight
+follow-up rounds rather than reasoning about them: ServiceNow itself
+never achieved a verified uniqueness-enforcement mechanism (FL-0018,
+OB-0016, OB-0019, OB-0023 - including confirming no conditional-write
+API exists to fall back on), and a `node:sqlite` durable-ownership
+prototype (`scripts/lib/idempotencyStore.ts`) closes every reproduced
+sequential crash boundary (OB-0017, OB-0021) but is defeated by a
+genuinely concurrent "slow owner, not dead" race, confirmed with real
+independent processes (OB-0022).
+[ADR 0005](../../docs/decisions/0005-external-side-effect-reliability-contract.md)
+decided the resulting fork: a mandatory Tier 1 baseline (recoverable
+at-least-once processing paired with audit-based detection of any
+residual gap/duplicate, not exactly-once) for any target, and an opt-in
+Tier 2 (exactly-once external effects) only for a target *proven* to
+enforce uniqueness itself - which ServiceNow has not done here.
+
+**Tier 1's normal path is now wired into `src/`:**
+`src/reliability/idempotencyStore.ts` (the production extraction of the
+prototype above - `acquireOperation`/`completeOperation`/`getOperation`,
+a real SQLite `PRIMARY KEY` as the atomic create-if-absent gate, keyed
+on `correlationId` - the business-operation identity, never
+`eventId` - the delivery identity) and
+`src/processDistributorOnboardingEvent.ts` (the orchestration function
+`src/index.ts` now calls for every event: acquire → create Incident →
+complete, or already-owned → skip) replace the old direct
+event-to-ServiceNow path. Verified against the real, live service (not
+just the extracted store): a fresh Salesforce event produces exactly
+one Incident and a completed local record; two concurrent deliveries of
+the same business operation, driven through the real
+`processDistributorOnboardingEvent` function
+(`npm run test-production-concurrent-idempotency`), produce exactly
+one; a restart resumes correctly from the saved checkpoint with no
+reprocessing. All three independently verified against ServiceNow, not
+just local state (`docs/devex/observations.md` OB-0025).
+
+**Still not wired in — deliberately, this round:**
+
+- Stale-operation recovery (reclaim + target reconciliation) - both
+  validated experimentally already (OB-0020, OB-0021), but not carried
+  into `idempotencyStore.ts`. Consequence: a crash between acquiring
+  ownership and completing it currently leaves that one business
+  operation stuck with no automatic recovery
+  (`docs/devex/friction-log.md` FL-0023, a known and accepted gap, not
+  an oversight).
+- The audit tool (`detect-unprocessed-events.ts`) on any automatic
+  schedule - still on-demand only.
+- Genuine multi-instance concurrency testing at the real entry point -
+  `src/salesforce/checkpoint.ts` assumes a single running instance, so
+  this round tested concurrent processing via two direct calls to the
+  real function rather than two live subscriber processes
+  (`docs/devex/friction-log.md` FL-0022).
+- A general retry / dead-letter framework, heartbeat/fencing, and Tier 2
+  for any target.
 - Giving the audit tool its own incremental "last audited position" so
   repeat runs don't always re-sweep from `EARLIEST` (LL-0011) - proposed,
   not built.

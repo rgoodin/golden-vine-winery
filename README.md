@@ -103,9 +103,15 @@ with validated audit-based detection of any residual gap or duplicate -
 which is honest about not being exactly-once, but never lets a failure
 go silent. A stronger, exactly-once guarantee is available only for a
 target *proven* to enforce uniqueness itself, evaluated the same
-rigorous way ServiceNow was: ServiceNow has not earned it yet. Nothing
-in the decision has been implemented; the next step is wiring the
-already-validated baseline mechanisms into the real service.
+rigorous way ServiceNow was: ServiceNow has not earned it yet.
+
+**Enablement has begun.** The baseline guarantee's normal processing
+path and concurrent-initial-processing protection are now wired into
+the real service, replacing the old direct event-to-ServiceNow path,
+and verified against real Salesforce and ServiceNow rather than only
+against the experimental prototype. Stale-operation recovery (reclaim
+and target reconciliation) is not wired in yet - a deliberate,
+documented gap, not an oversight - and is the next smallest step.
 
 See [`CLAUDE.md`](./CLAUDE.md) ("Current Repository State") for the
 up-to-date summary,
