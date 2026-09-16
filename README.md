@@ -118,10 +118,16 @@ decided it: source it from Salesforce's retained replay history at
 recovery time, rather than persisting business payload or a Salesforce
 position reference locally - with an explicit fallback (an unlocatable
 source event stays an observable, unresolved gap, never silently
-treated as recovered). What's still missing is anything that triggers
-recovery automatically - today it has to be invoked deliberately, with
-the original event in hand - a deliberate, documented gap, not an
-oversight, and the next smallest step.
+treated as recovered). The existing audit tool and the recovery
+function have since been composed under that contract: a manually
+triggered `--recover` mode lets the audit sweep hand a GAP it just
+found straight to recovery in the same run, verified end-to-end against
+real Salesforce and ServiceNow - a duplicate is never touched by it, and
+an unrecoverable gap stays a gap rather than being marked resolved just
+because recovery was requested. What's still missing is anything that
+triggers this automatically - today an operator has to run it
+deliberately - a deliberate, documented gap, not an oversight, and the
+next smallest step.
 
 See [`CLAUDE.md`](./CLAUDE.md) ("Current Repository State") for the
 up-to-date summary,

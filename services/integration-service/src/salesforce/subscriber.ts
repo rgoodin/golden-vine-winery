@@ -8,8 +8,13 @@ import { DistributorOnboardingRequestedEvent } from '../types/events';
  * so this flattening/remapping is the boundary between Salesforce's actual
  * schema and our canonical contract - see
  * docs/decisions/0003-platform-event-schema.md.
+ *
+ * Exported so anything that reads a raw decoded Platform Event directly -
+ * e.g. `scripts/detect-unprocessed-events.ts`, which already holds a raw
+ * event via `replayRange()` when it classifies a GAP - can reuse the exact
+ * same mapping recovery expects, instead of a second, drifting copy of it.
  */
-function toCanonicalEvent(raw: Record<string, unknown>): DistributorOnboardingRequestedEvent {
+export function toCanonicalEvent(raw: Record<string, unknown>): DistributorOnboardingRequestedEvent {
   return {
     eventType: 'DistributorOnboardingRequested',
     eventVersion: String(raw.Event_Version__c ?? ''),

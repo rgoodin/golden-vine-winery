@@ -1334,4 +1334,97 @@ concerns.
 
 ---
 
+### FL-0026: A "0 events collected" sweep can be a cold-start artifact, not an empty topic - and now it can also silently mean "no recovery attempted"
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0006's recommended next step)
+
+#### Observation
+
+Running `detect-unprocessed-events` (audit-only, no `--recover`) as
+the very first command of this round returned `Collected 0 event(s)
+from Salesforce.` - after `get-topic-info` had just confirmed the topic
+itself was reachable and correctly configured (`canPublish`/
+`canSubscribe: true`).
+
+#### Friction
+
+This result looked exactly like the risk ADR 0006 explicitly names as
+unestablished: Salesforce replay retention having expired for
+everything this project has ever published. Taking that reading at
+face value would have meant writing a materially wrong finding into
+this round's evidence. Rerunning the identical sweep minutes later
+(inside this round's own test harness) reliably returned all 19
+retained events, including ones from earlier sessions - the topic was
+never actually empty. The most likely explanation is a cold-start race
+between the gRPC `Subscribe` stream's connection setup and
+`replayRange()`'s `windowMs` timer on a fresh process's very first
+call - not confirmed further, out of scope this round.
+
+#### Impact
+
+An operator (or this investigation) trusting a single "0 events"
+result at face value would draw a false conclusion - either "nothing to
+audit" when there was plenty, or, now that `--recover` mode exists,
+silently "nothing was recovered" when recovery was never actually
+attempted because the sweep itself came back empty. The second version
+is sharper than the first: `--recover=<ms>` with an empty sweep result
+produces an exit that looks identical, in isolation, to a completely
+successful audit-and-recover run that legitimately found no GAPs.
+
+#### Possible Enablement
+
+None yet. Worth remembering if this script is ever promoted beyond
+manual/on-demand use: a 0-event result should probably be treated as
+suspicious rather than conclusive - e.g. logged distinctly from "swept
+N events, 0 were GAPs" - rather than trusted on a single run, especially
+once something (a person or a future scheduler) is expected to act on
+its output without a human re-running it to sanity-check.
+
+---
+
+### FL-0027: The audit script now owns sweep, classify, map-to-canonical, and recover - worth watching, not yet worth splitting
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0006's recommended next step)
+
+#### Observation
+
+After wiring `--recover` in, `detect-unprocessed-events.ts` does all of:
+replay Salesforce, classify against ServiceNow via its own query
+function (separate from `incidentReconciliation.ts`'s, which serves a
+different purpose - existence vs. multiplicity), parse two distinct CLI
+modes, map raw payloads to the canonical event shape, invoke recovery,
+and print two visually distinct vocabularies of output
+(`GAP`/`OK`/`DUPLICATE`/`UNEVALUABLE` vs. `RECOVERED`/`NOT RECOVERED`).
+
+#### Friction
+
+None yet, concretely - the file is still readable start to finish, and
+the task's own instruction to keep this round's change small argued
+directly against extracting anything new. But the responsibility count
+is visibly higher than it was, and asking "does the audit script now do
+too much" is a fair question to have asked explicitly rather than let
+accumulate unnoticed, the same way OB-0025/OB-0026's implementations
+were checked against DP-0003/DP-0007's boundary rather than assumed
+fine.
+
+#### Impact
+
+None realized yet. The honest answer this round is "not yet, but this
+is the direction that question starts mattering in" - a third
+composition (e.g. wiring a scheduler on top of this exact script, per
+ADR 0006's larger, not-yet-scoped next-next step) would be a reasonable
+trigger to revisit whether the CLI-parsing/orchestration loop should
+separate from the "classify one event" logic, rather than growing a
+third mode onto the same file.
+
+#### Possible Enablement
+
+None proposed yet. Recorded as a thing to watch, consistent with this
+project's practice of not extracting an abstraction before a second or
+third real use demands it (DP-0003, DP-0007).
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

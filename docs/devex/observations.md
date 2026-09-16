@@ -1454,4 +1454,103 @@ diagnostic script above; `idempotencyStore.ts`,
 
 ---
 
+### OB-0028: The audit tool and the production recovery function were composed under an explicit opt-in switch - GAP recovers, DUPLICATE never does, unrecoverable GAPs stay GAP
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0006's own recommended next step)
+**Category:** implementation / verification
+
+Implements ADR 0006's "Next step" exactly as scoped: connects
+`scripts/detect-unprocessed-events.ts`'s existing `GAP` classification
+to `recoverStaleDistributorOnboardingOperation()` (OB-0026), still
+manually triggered, no scheduler, no automatic background recovery.
+
+**Changes, both small:** `src/salesforce/subscriber.ts`'s
+`toCanonicalEvent()` mapping is now exported, so the audit script reuses
+the exact same raw-payload-to-canonical-event mapping recovery expects
+instead of a second, drifting copy of it. `detect-unprocessed-events.ts`
+gained an explicit `--recover=<staleAfterMs>` mode - bare `--recover`
+with no value is rejected outright rather than defaulted, since ADR
+0005 already named the staleness threshold an operational tuning knob
+this project hasn't chosen a production value for. Without `--recover`,
+the script's behavior is byte-for-byte what it was before this round -
+audit-only, read-only, no ServiceNow writes. `src/reliability/idempotencyStore.ts`,
+`recoverStaleDistributorOnboardingOperation.ts`, and
+`incidentReconciliation.ts` are all untouched - the composition lives
+entirely in the script, reusing all three unchanged.
+
+**End-to-end evidence, all three cases run through the real,
+unmodified CLI as a subprocess (`npm run test-audit-recovery-composition`,
+which shells out to `npx ts-node scripts/detect-unprocessed-events.ts --recover=<ms>`
+exactly as an operator would invoke it):**
+
+- **Case 1 (recoverable GAP):** acquired locally, no ServiceNow call
+  (OB-0026's Case 1 shape). Classified `GAP`, then `RECOVERED` in the
+  same run (`foundExisting=false`, Incident INC0010040 created).
+  Independently verified: exactly one Incident in ServiceNow, local
+  state `completed`. A re-audit immediately afterward classified it
+  `OK`. **PASS.**
+- **Case 2 (unresolvable GAP - never acquired locally):** published,
+  no local durable record at all. Classified `GAP`, then
+  `NOT RECOVERED` (`reclaimOperation` found no row to reclaim).
+  Independently verified: zero Incidents, local state `null` (recovery
+  created nothing). A re-audit immediately afterward still classified
+  it `GAP` - **recovery being requested did not mark an unresolved GAP
+  as completed.** **PASS.**
+- **Case 3 (DUPLICATE):** two real Incidents created directly for the
+  same correlationId, no local durable record. Classified `DUPLICATE`;
+  no `RECOVERED`/`NOT RECOVERED` line was ever printed for it - recovery
+  was never invoked, by construction (the branch is `classification ===
+  'GAP' && recover`, not a runtime check on top of a broader routing
+  path). Independently verified: still exactly two Incidents (no third
+  created), local state still `null`. A re-audit afterward still
+  classified it `DUPLICATE`, unchanged. **PASS.**
+
+**A fourth, unplanned but real recovery happened in the same run:**
+`b6c91d35-bccb-48a5-b393-7555fe297376`, a genuinely stale `in_flight`
+local record left over from OB-0027's own experiment (acquired in an
+earlier session, never completed), was swept up by the same
+`EARLIEST` replay, classified `GAP`, and correctly recovered
+(INC0010039) - real evidence that recovery works on state that's
+actually old, not just freshly created within the same test run.
+
+**A genuine, previously-unknown operational quirk was also found and
+corrected before it became a false claim:** the very first
+`detect-unprocessed-events` invocation this round (audit-only, no
+`--recover`) returned **0 events**, immediately after a real topic
+existence check (`get-topic-info`) confirmed the topic itself was fine.
+This looked, briefly, like Salesforce retention expiry - exactly the
+unestablished risk ADR 0006 names. Rerunning the exact same sweep
+minutes later (inside this round's harness) reliably returned all 19
+retained events, including ones from earlier sessions. **This was not
+retention expiry** - most likely a cold-start artifact of the gRPC
+`Subscribe` stream's connection warmup racing `replayRange`'s
+`windowMs` timer on a fresh process's very first call, not investigated
+further this round (out of scope). Recorded as FL-0026 - a real,
+reproducible-looking "nothing to audit" result can be a false negative,
+not evidence of an empty topic, and should be re-checked before being
+trusted, especially now that `--recover` mode makes "collected 0
+events" also mean "no recovery attempted."
+
+**DUPLICATE and other non-GAP classifications:** confirmed unchanged by
+this round for every classification this run observed among the full
+19-event history (`OK`, `DUPLICATE`, `UNEVALUABLE` all behaved exactly
+as they did before `--recover` existed) - the new branch is additive,
+gated on `GAP`, not a change to classification logic itself.
+
+**Checkpoint/replay behavior confirmed unregressed:** ran the live
+subscriber, published a fresh event, confirmed normal processing and a
+saved checkpoint; restarted it and confirmed it resumed
+`ReplayPreset.CUSTOM` from exactly that checkpoint with no reprocessing.
+
+**What this round did not build, per its explicit scope:** any
+scheduler or cron trigger, automatic/background recovery, a retry loop,
+heartbeat/fencing, Tier 2, automatic duplicate remediation, or anything
+addressing OB-0022's slow-owner race. See FL-0026 and FL-0027 for new
+implementation/operator friction this round exposed, and
+`docs/devex/dojo-perspectives.md` DP-0017 onward for what this
+composition looked like from each DevEx Dojo role.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

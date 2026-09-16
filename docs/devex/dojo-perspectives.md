@@ -350,6 +350,85 @@ real fork appears, which is exactly what keeps a Golden Path's
 decisions traceable instead of accumulating as implicit, undocumented
 choices buried in code.
 
+### DP-0017: Composing two validated components cost almost nothing in code - and the one real trap wasn't in either of them
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0006's recommended next step)
+**Perspective:** Developer
+
+Wiring GAP detection to recovery touched two small things: exporting a
+mapping function that already existed, and one new branch in a script
+gated on an explicit flag. Neither `idempotencyStore.ts` nor
+`recoverStaleDistributorOnboardingOperation.ts` changed at all. The
+actual trap this round (FL-0026) wasn't in the composition's logic -
+it was trusting a single "0 events" result from `replayRange()` at
+face value, which briefly looked like confirmation of ADR 0006's exact
+named risk (retention expiry) before a second run showed it wasn't. The
+lesson isn't about this composition specifically - it's that the
+riskiest moment in a round like this is often not the new code, it's
+believing the first result a diagnostic tool gives you without
+re-running it, especially right before that result becomes a documented
+finding.
+
+### DP-0018: Requiring an explicit value, not just an explicit flag, is what made the dangerous mode hard to trigger by accident
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0006's recommended next step)
+**Perspective:** Dojo Instructor
+
+`--recover` alone is rejected; only `--recover=<milliseconds>` runs
+recovery. That extra requirement is a small interface decision worth
+naming as a teaching pattern: a bare boolean flag toggling a
+side-effecting mode is one typo or one copy-pasted command away from
+running when the operator meant audit-only. Forcing a value - one this
+script deliberately has no default for, since ADR 0005 already named
+the staleness threshold an undecided operational knob - means every
+invocation of recovery mode carries visible evidence, in the command
+itself, that the operator meant to run it and chose a threshold, rather
+than inheriting one silently. Worth carrying forward as a default habit
+for any future opt-in mutation mode this project builds: prefer a
+required value over a bare switch when the switch's whole job is "make
+sure this was on purpose."
+
+### DP-0019: Noticing a script's responsibilities are growing is useful on its own, even without acting on it yet
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0006's recommended next step)
+**Perspective:** Platform Engineer
+
+`detect-unprocessed-events.ts` now sweeps, classifies, maps payloads to
+canonical shape, and recovers - visibly more than it did. DP-0003 and
+DP-0007 have twice confirmed the value of not adding a boundary before
+a second real use demands it; FL-0027 applies the same discipline in
+the other direction, at script level rather than `src/`-level: naming
+that a script is accumulating responsibility is worth doing explicitly,
+even when the answer this round is "not yet a problem, don't split it."
+The value isn't the extraction - there isn't one yet - it's having a
+named trigger condition (a third composition landing on the same file)
+recorded now, so the decision to split it later is made deliberately
+against a concrete cause rather than reactively once the file has
+already become hard to read.
+
+### DP-0020: One friction entry from two rounds ago just closed its own loop - the clearest sign yet that Enablement's friction becomes real material, not just a record
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0006's recommended next step)
+**Perspective:** Dojo Director
+
+FL-0025 named a gap: normal redelivery doesn't trigger recovery, and
+nothing connects a `GAP` classification to an actual recovery call.
+OB-0027 investigated where recovery's payload should come from. ADR
+0006 decided it. This round connects the two functions FL-0025 named as
+disconnected, under the exact contract ADR 0006 decided, and proves it
+end-to-end against real Salesforce and ServiceNow - four rounds,
+starting from one implementation-round observation that could easily
+have been logged and forgotten. That's the concrete version of what
+`CLAUDE.md`'s cycle diagram claims in the abstract: friction recorded
+during Enablement isn't just a historical note, it's the actual
+material the next several rounds of work are built from, followed
+through to a real, tested, manually-triggered composition rather than
+left as an open question indefinitely.
+
 ---
 
 <!-- Add new entries above this line, most recent first. -->

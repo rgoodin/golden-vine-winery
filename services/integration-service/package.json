@@ -21,7 +21,8 @@
     "test-servicenow-conditional-create": "ts-node scripts/test-servicenow-conditional-create.ts",
     "test-production-concurrent-idempotency": "ts-node scripts/test-production-concurrent-idempotency.ts",
     "test-production-recovery": "ts-node scripts/test-production-recovery.ts",
-    "test-recovery-payload-source": "ts-node scripts/test-recovery-payload-source.ts"
+    "test-recovery-payload-source": "ts-node scripts/test-recovery-payload-source.ts",
+    "test-audit-recovery-composition": "ts-node scripts/test-audit-recovery-composition.ts"
   },
   "dependencies": {
     "@grpc/grpc-js": "^1.10.9",

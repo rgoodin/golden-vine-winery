@@ -325,12 +325,31 @@ horizon) and defines the fallback: an operation whose source event
 can't be located stays an observable `GAP`, never silently treated as
 recovered.
 
+**ADR 0006's own recommended next step is done: the audit tool can now
+recover the GAPs it finds, in the same run, still fully manual.**
+`detect-unprocessed-events.ts` gained an explicit
+`--recover=<staleAfterMs>` mode - bare `--recover` with no value is
+rejected, not defaulted, since ADR 0005 already named the staleness
+threshold an undecided operational knob. Each `GAP` hands its
+already-decoded event straight to
+`recoverStaleDistributorOnboardingOperation()` - no second Salesforce
+replay lookup (`src/salesforce/subscriber.ts`'s `toCanonicalEvent()` is
+now exported and reused, not duplicated), and no change to
+`idempotencyStore.ts`, `incidentReconciliation.ts`, or the recovery
+function itself. Verified end-to-end through the real, unmodified CLI
+run as a subprocess (`npm run test-audit-recovery-composition`,
+`docs/devex/observations.md` OB-0028): a recoverable GAP is recovered
+and reclassifies `OK` on re-audit; a GAP with no local record is
+reported `NOT RECOVERED` and **stays GAP**, never marked completed just
+because recovery was requested; a `DUPLICATE` is never routed through
+recovery at all - confirmed by the absence of any recovery attempt in
+its output, not just by inspection.
+
 **Still not wired in — deliberately:**
 
-- Anything that triggers recovery automatically (a scheduled worker, or
-  wiring the audit tool's `GAP` output to a recovery call) - this is the
-  smallest next Tier 1 Enablement step, not yet done. ADR 0006's own
-  "Next step" describes it; not implemented.
+- Any scheduler or automatic trigger for `--recover` mode (e.g. tied to
+  a regular audit schedule) - a distinct, larger Enablement decision,
+  not yet scoped or built.
 - The audit tool (`detect-unprocessed-events.ts`) on any automatic
   schedule - still on-demand only.
 - Genuine multi-instance concurrency testing at the real entry point -

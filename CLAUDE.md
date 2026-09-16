@@ -141,15 +141,36 @@ guarantee (no permanent payload durability, no random-access event
 retrieval, dependent on an unestablished retention horizon) and defines
 the fallback when a source event can't be located: it remains an
 observable `GAP`, never silently treated as recovered. Nothing from
-this ADR has been implemented — `recoverStaleDistributorOnboardingOperation()`
-already matches the decision as-is (OB-0026), so no code change is
-required to conform to it.
+this ADR was implemented at the time it was written —
+`recoverStaleDistributorOnboardingOperation()` already matched the
+decision as-is (OB-0026), so no code change was required to conform to
+it.
+
+**ADR 0006's own recommended next step is now done: `detect-unprocessed-events.ts`
+can recover the GAPs it finds, in the same run, still fully manual.**
+An explicit `--recover=<staleAfterMs>` mode (no default - a bare
+`--recover` is rejected) hands each `GAP` classification's
+already-decoded event straight to `recoverStaleDistributorOnboardingOperation()`
+- no second Salesforce replay lookup, no change to
+`idempotencyStore.ts`, `incidentReconciliation.ts`, or the recovery
+function itself. Verified end-to-end via the real, unmodified CLI
+(`npm run test-audit-recovery-composition`, OB-0028): a recoverable GAP
+is classified, recovered, and reclassified `OK` on re-audit; a GAP with
+no local durable record is classified, reported `NOT RECOVERED`, and
+**stays GAP** rather than being marked completed just because recovery
+was requested; a `DUPLICATE` is never routed through recovery at all.
+Also recovered, unplanned but real: a genuinely stale operation left
+over from an earlier session's experiment. One real operational finding
+surfaced and was corrected before becoming a false claim: a "0 events
+collected" sweep briefly looked like retention expiry and turned out to
+be a transient cold-start artifact instead (FL-0026) - worth re-checking
+before trusting, especially now that it can also mean "no recovery
+attempted."
 
 Also proposed but deliberately not built: giving the audit tool its own
 incremental "last audited position" so repeat runs don't always re-sweep
-from `EARLIEST` (LL-0011). Not yet built: connecting the audit tool's
-`GAP` output to a recovery call (ADR 0006's own recommended next step),
-any Tier 2 investigation, and tests. See
+from `EARLIEST` (LL-0011). Not yet built: any scheduler or automatic
+trigger for this recovery mode, any Tier 2 investigation, and tests. See
 `services/integration-service/README.md` for current status and
 `docs/devex/dojo-perspectives.md` for what these Enablement rounds
 looked like from each DevEx Dojo role.
@@ -169,6 +190,8 @@ Commands (from `services/integration-service/`):
     npm run test-production-concurrent-idempotency # verify the durable-ownership gate via the real processing function
     npm run test-production-recovery              # verify stale-operation recovery via the real recovery function
     npm run test-recovery-payload-source          # investigate where recovery should source its payload from (OB-0027)
+    npm run detect-unprocessed-events -- --recover=<ms> # audit + recover GAPs manually, in one run (ADR 0006, OB-0028)
+    npm run test-audit-recovery-composition       # verify the audit+recovery composition end-to-end (OB-0028)
 
 There is no lint or test tooling yet — do not invent commands for either.
 No other services exist yet. When more are added, or lint/test tooling is
