@@ -1109,4 +1109,73 @@ the other was also acting on the same business-operation ID.
 
 ---
 
+### OB-0023: ServiceNow's Table API has no conditional-write mechanism at all - confirmed by official documentation and direct testing, not assumed
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Developer Experience
+**Category:** experiment / research / platform
+
+Direct follow-up to OB-0022, narrower than FL-0018's schema-level
+investigation: does ServiceNow's Table API, or another directly usable
+ServiceNow record-creation API, let the *target* atomically reject a
+create when a business condition no longer holds or a record already
+exists - not a client-side lookup, not a client-side fencing check
+(both already rejected, OB-0014 and OB-0022 respectively)?
+
+**Official documentation checked first, not assumed.** Fetched
+ServiceNow's own Table API reference
+(`servicenow.com/docs/.../c_TableAPI.html`, Washington DC release)
+directly. It documents the exact header set each operation (`GET`,
+`POST`, `PUT`, `PATCH`, `DELETE`) accepts. **None of the five operations
+document `ETag`, `If-Match`, `If-None-Match`, or any conditional/
+precondition mechanism at all** - not just missing from `POST`, missing
+from the entire API surface.
+
+**Verified empirically against the real instance, not trusted from
+documentation alone**, via `scripts/test-servicenow-conditional-create.ts`
+(itil-role credentials, no privilege change):
+
+- Neither a list `GET` nor a single-record `GET` returns an `ETag` or
+  `Last-Modified` header - there is no version identifier for a
+  conditional request to even reference.
+- A `POST` (create) sent with `If-None-Match: *` succeeded normally
+  (`201`) - the header was silently ignored, not enforced and not
+  rejected as unsupported.
+- **Two concurrent `POST`s for the same business-operation ID, both
+  carrying `If-None-Match: *`, both succeeded** - independently
+  verified, 2 Incidents resulted. The textbook HTTP conditional-create
+  pattern provides zero protection here, confirmed directly rather than
+  inferred from the missing documentation.
+- `PUT` to a deliberately never-used `sys_id` returned `404 No Record
+  found` - `PUT` is update-only in this API; there is no
+  upsert-via-`PUT` path to even attach a conditional header to.
+
+**Import Set + Transform Map coalesce** (flagged as reasoned-but-untested
+in FL-0018's second follow-up) was checked against public ServiceNow
+community reports rather than built and tested hands-on this round, to
+keep the investigation bounded per instruction: multiple independent
+reports describe coalesce producing duplicate records under
+concurrent/repeated submission via the REST API, consistent with the
+existing reasoning that coalesce performs an existence check and a
+write as two separate steps, not one atomic operation.
+
+**GraphQL mutations** were checked and found not to be a ready-made
+mechanism either - ServiceNow's GraphQL framework requires a
+*Scripted resolver* (custom `GlideRecord`-based server-side code
+written by the developer) to implement a `createIncident`-style
+mutation at all. No built-in conditional-create or optimistic-concurrency
+primitive exists for it to inherit; building one would mean writing new
+ServiceNow server-side code - implementation, not investigation, and
+explicitly out of scope this round.
+
+**Conclusion: confirmed no.** No standard, non-custom-scripted
+ServiceNow API in this environment lets the target atomically evaluate
+a business condition or fencing/generation value as part of accepting a
+create. This is not merely "not yet found" - it is documented as absent
+across the entire Table API surface and directly confirmed absent by
+testing the one candidate mechanism (`If-None-Match`) that would have
+been usable without writing any new ServiceNow-side code.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

@@ -94,18 +94,32 @@ were then tested directly, repeatedly, rather than reasoned about:
   establish (LL-0017) — the two candidates' remaining blockers turn out
   to be the same question, asked from two different layers.
 
+**That target-side question was then asked directly, not left as
+inference: does any ServiceNow API let the target atomically reject a
+stale create? Confirmed no** — checked against ServiceNow's own official
+Table API reference (no conditional-request headers documented for any
+operation) and directly tested (`If-None-Match: *` on `POST` is silently
+ignored; two concurrent creates carrying it both still succeed,
+independently verified; `PUT` cannot create a not-yet-existing record).
+Import Set coalesce and GraphQL mutations don't help either without
+writing new ServiceNow server-side code (OB-0023). This closes off
+every standard, non-custom-scripted door for ServiceNow-side write
+enforcement this project has checked.
+
 On experimentally established facts alone: Candidate C protects against
 concurrent initial processing, crash-before-side-effect,
 crash-after-side-effect, and concurrent reclaim — four of five
-properties checked, the strongest verified position either candidate
-has reached — but not the slow-owner race, confirmed unsafe rather than
-merely untested. Both candidates now have a specific, named, confirmed
-blocker rather than a vague "needs more investigation" — see
-`docs/architecture/0001-reliability-architecture-spike.md` §7 for both,
-including the next recommended investigation (whether ServiceNow
-supports any conditional-write precondition on `create`, a narrower
-question than FL-0018's schema-level one). Still no architecture chosen,
-no ADR written.
+properties checked — but not the slow-owner race, confirmed unsafe, and
+now confirmed unfixable by any client-reachable ServiceNow API. Both
+candidates' remaining blockers point at the same fact: no target-side
+write enforcement is available without writing new ServiceNow
+server-side code. The next step is an architecture-level fork, not
+another incremental experiment — either write that server-side code (a
+real, unmade commitment) or accept a duplicate window and lean on the
+existing, validated audit tool (`detect-unprocessed-events.ts`,
+OB-0012) for detection instead of prevention — see
+`docs/architecture/0001-reliability-architecture-spike.md` §7. Still no
+architecture chosen, no ADR written.
 
 Also proposed but deliberately not built: giving the audit tool its own
 incremental "last audited position" so repeat runs don't always re-sweep

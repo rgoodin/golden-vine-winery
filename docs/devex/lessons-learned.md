@@ -1012,6 +1012,80 @@ demonstrated safety, not reduced likelihood.
 
 ---
 
+### LL-0018: This project has now checked every standard door for target-side write enforcement - all are confirmed closed, without writing new ServiceNow server-side code
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Developer Experience
+**Evidence:** OB-0023
+
+**Lesson:** LL-0017 named a specific next question: does ServiceNow's
+Table API support any conditional-write precondition on `create`? This
+round answered it - **confirmed no**, by ServiceNow's own official
+documentation (the entire Table API reference documents no `ETag`/
+`If-Match`/`If-None-Match` support, for any operation) and by direct
+testing against the real instance (an `If-None-Match: *` header on
+`POST` is silently ignored; two concurrent creates carrying it both
+still succeed; `PUT` cannot create a not-yet-existing record at all, so
+there is no upsert path to attach a conditional header to either).
+Import Set coalesce - the other named "supported mechanism" candidate,
+first raised in FL-0018's second follow-up - is corroborated by public
+ServiceNow community reports of duplicate records under concurrent
+submission despite coalesce being configured, consistent with the
+standing reasoning that it is a query-then-write pattern, not an atomic
+operation. GraphQL mutations require writing custom server-side
+resolver code to create a record at all - there is no built-in
+primitive to test without first implementing something, which is out
+of scope for investigation.
+
+**Put together with FL-0018/OB-0019 and OB-0022, this project has now
+checked every standard, non-custom-scripted door for target-side
+write enforcement on this ServiceNow instance, and found all of them
+either closed or unbuildable without writing new server-side code:**
+
+- Schema-level unique index (`sys_index`): the manual path is blocked
+  by platform ACL design; the supported wizard fails for an
+  undiagnosed reason (FL-0018, OB-0019).
+- HTTP conditional-write semantics on the Table API: does not exist,
+  confirmed by documentation and direct test (OB-0023).
+- Import Set + Transform Map coalesce: not atomic, corroborated by
+  independent real-world reports (OB-0023).
+- GraphQL mutations: no built-in primitive; would require custom
+  server-side scripting to even attempt (OB-0023).
+
+**This changes the shape of the remaining question.** It is no longer
+"which ServiceNow API feature have we not tried yet" - this round
+closes that list for anything reachable without writing new ServiceNow
+server-side code. What remains is a genuine architecture-level fork,
+not another incremental experiment:
+
+1. **Write server-side ServiceNow code** (a Business Rule or Scripted
+   REST API) that performs the existence-check-and-insert *inside one
+   ServiceNow transaction*, rather than as two separate HTTP round
+   trips from the integration. This is a materially different proposal
+   from anything tested so far - a single server-side transaction may
+   be able to rely on the underlying database's own row-locking
+   semantics in a way two independent client requests structurally
+   cannot, HTTP conditional headers or not. It is also a real
+   commitment this project hasn't made yet: ServiceNow platform
+   development (update sets, a new skill area, code living on the
+   target instead of in this repository) - not something to start
+   without the user deciding that tradeoff is worth it.
+2. **Accept a nonzero-probability duplicate window and rely on
+   detection instead of prevention.** This project already has a
+   validated audit tool (`detect-unprocessed-events.ts`, OB-0012) that
+   correctly classifies `DUPLICATE` outcomes, not just `GAP`. Given
+   every prevention avenue reachable without new server-side code is
+   now closed, pairing a chosen candidate (A or C) with that existing
+   detection capability - rather than continuing to search for a
+   prevention mechanism that may not exist - is a legitimate
+   architecture position, not a concession.
+
+Neither has been designed, decided, or implemented here - this is the
+fork this investigation has arrived at, not a recommendation for which
+branch to take. That choice belongs in the eventual ADR.
+
+---
+
 ## Recommended smallest Phase 3 Enablement experiment (not started)
 
 The prior recommendation (extend the detector to catch duplicates, not

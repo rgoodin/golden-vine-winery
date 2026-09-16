@@ -1,7 +1,7 @@
 # Architecture Spike: Guaranteeing Exactly-One Incident per Business Event
 
 **Status:** SPIKE — investigation only. No decision made, no ADR written.
-**Date:** originally 2026-09-15; updated across seven follow-up rounds
+**Date:** originally 2026-09-15; updated across eight follow-up rounds
 spanning 2026-09-15–16 as this document's own open questions were
 tested one at a time rather than reasoned about. In order: (1) the
 initial spike (§1–§7 as originally written); (2) a ServiceNow
@@ -15,12 +15,14 @@ supported wizard's still-unexplained failure (§3a's second "Follow-up");
 (§4 "C-reclaim") and whether target reconciliation closes the gap
 reclaim alone couldn't (§4 "C-reconciliation"); (7) reproducing the
 slow-original-owner race with genuinely independent processes and
-confirming it unsafe (§4 "C-slow-owner-race"). Full round-by-round
+confirming it unsafe (§4 "C-slow-owner-race"); (8) checking whether any
+ServiceNow API provides a target-enforced conditional-write mechanism
+that could close that gap - confirmed no (§3c). Full round-by-round
 detail lives in the DevEx journal entries cited throughout, not
 repeated here.
 **Related:** `docs/devex/friction-log.md` FL-0011–FL-0021,
-`docs/devex/observations.md` OB-0007–OB-0022,
-`docs/devex/lessons-learned.md` LL-0005–LL-0017,
+`docs/devex/observations.md` OB-0007–OB-0023,
+`docs/devex/lessons-learned.md` LL-0005–LL-0018,
 `docs/decisions/0001`–`0004`
 
 ## Purpose
@@ -342,6 +344,63 @@ incorrect claim about `GetTopic` exposing a `retention_policy` field -
 FL-0013. This round's platform investigation is consistent with
 everything already recorded.)
 
+### 3c. Conditional-write capability investigation (bounded follow-up to OB-0022)
+
+OB-0022 confirmed that integration-local ownership (Candidate C's
+`acquire`/`reclaim`) cannot, by itself, prevent a stale-but-still-alive
+worker from producing a real ServiceNow side effect after ownership has
+transferred - closing that gap for real requires the *target* to
+participate in the decision. This round asked one narrower question
+than FL-0018's schema-level investigation: does ServiceNow's Table API,
+or another directly usable ServiceNow record-creation API, provide any
+target-enforced conditional-create mechanism - not a client-side
+`GET`-then-`POST` (already rejected, OB-0014) and not a client-side
+fencing check before `POST` (already rejected, OB-0022) - that could
+close it?
+
+**Documentation checked first.** ServiceNow's own Table API reference
+(Washington DC release) documents the exact headers each operation
+(`GET`, `POST`, `PUT`, `PATCH`, `DELETE`) accepts. None of the five
+document `ETag`, `If-Match`, `If-None-Match`, or any conditional/
+precondition mechanism - not specific to `POST`, absent from the entire
+API surface.
+
+**Verified empirically, not trusted from documentation alone**
+(`scripts/test-servicenow-conditional-create.ts`, itil-role credentials,
+no privilege change): neither list nor single-record `GET` returns an
+`ETag` or `Last-Modified` header (no version identifier exists for a
+conditional request to reference); a `POST` sent with
+`If-None-Match: *` succeeded normally, the header silently ignored;
+**two concurrent `POST`s for the same business-operation ID, both
+carrying `If-None-Match: *`, both succeeded** - independently verified,
+2 Incidents resulted, confirming the textbook HTTP conditional-create
+pattern provides zero protection here; `PUT` to a never-used `sys_id`
+returned `404`, confirming `PUT` is update-only with no upsert path to
+attach a conditional header to.
+
+**Import Set + Transform Map coalesce** (the other candidate mechanism
+named in FL-0018's second follow-up, reasoned about but not hands-on
+tested there either) was checked against public ServiceNow community
+reports rather than built this round, to stay bounded: independent
+reports describe coalesce producing duplicate records under
+concurrent/repeated REST submission, consistent with the standing
+reasoning that it performs an existence check and a write as two
+separate steps, not one atomic operation.
+
+**GraphQL mutations** were checked and are not a ready-made mechanism -
+ServiceNow's GraphQL framework requires a custom *Scripted resolver*
+(developer-written `GlideRecord` code) to implement record creation at
+all. No built-in conditional-create or optimistic-concurrency primitive
+exists to test without first writing new ServiceNow-side code -
+implementation, explicitly out of scope this round.
+
+**Conclusion: confirmed no**, for every mechanism reachable without
+writing new ServiceNow server-side code. This is not "not yet found" -
+it is documented as absent across the Table API's entire surface and
+directly confirmed absent by testing the one candidate mechanism that
+would have required no new ServiceNow-side code to try. Full account:
+OB-0023, LL-0018.
+
 ---
 
 ## 4. Candidate approaches
@@ -658,6 +717,14 @@ to be the same question, asked from two different layers** - not fully
 independent alternatives the way the original spike framed them
 (LL-0017).
 
+**That target-side question was then asked directly, not left as
+inference - see §3c.** Answer: confirmed no target-enforced
+conditional-write mechanism exists that's reachable without writing new
+ServiceNow server-side code (OB-0023, LL-0018). Candidate C's
+slow-owner gap remains open; the next question is no longer "which
+ServiceNow API feature closes it" but an architecture-level fork
+(§3c, §7).
+
 ### D. Salesforce Pub/Sub `ManagedSubscribe` / `CommitReplay`
 
 **What was investigated:** read directly against
@@ -713,9 +780,15 @@ identity is a publisher-contract problem, not a field-availability one.
   `create` ACL on `sys_index` requiring an unassignable role); the
   other (the supported wizard) has failed with privilege, data, table
   complexity, and field type all ruled out as the cause, but without a
-  definitive "not possible" answer either. Import Set + coalesce remains
-  an architecture change, not a config tweak, and was reasoned about but
-  not hands-on tested.
+  definitive "not possible" answer either. **A narrower, platform-wide
+  question was then checked directly: does ServiceNow's Table API
+  support any conditional-write precondition at all, independent of the
+  schema-level index question? Confirmed no, by official documentation
+  and direct test (OB-0023)** - closing off the one path (an
+  `If-None-Match`-style create) that wouldn't have required writing new
+  ServiceNow server-side code. Import Set + coalesce and GraphQL
+  mutations were also checked and found not to help either, without
+  writing new server-side code (OB-0023).
 - **B (lookup-before-create):** Smallest, fastest, reuses proven code -
   but a race-prone mitigation, not a guarantee, unless paired with A.
 - **C (durable state):** Most complete and most platform-agnostic on
@@ -734,8 +807,10 @@ identity is a publisher-contract problem, not a field-availability one.
   deterministically, 3/3 iterations** (OB-0022) - and this specific gap
   cannot be closed by tuning the local mechanism further; closing it for
   real converges on the same target-side capability Candidate A has been
-  unable to establish (LL-0017). Doesn't eliminate the checkpoint-
-  ordering question either, it sits alongside it.
+  unable to establish (LL-0017), **now confirmed unavailable through any
+  standard, non-custom-scripted ServiceNow API (OB-0023).** Doesn't
+  eliminate the checkpoint-ordering question either, it sits alongside
+  it.
 - **D (`ManagedSubscribe`):** Solves a real, already-documented problem
   (FL-0017) but does not touch this investigation's actual question.
   Adopting it without also choosing A or C would look like progress while
@@ -778,15 +853,16 @@ FL-0017, independent of whichever of A/C is eventually chosen here.
   support tooling). This determines whether Candidate A is actually
   infeasible here or just not yet achieved - and is now past what
   further UI-only investigation can resolve (see §7).
-- Whether Import Set + Transform Map coalesce is configurable in this
-  instance - **still not hands-on attempted**, by deliberate choice to
-  keep each investigation round bounded. Reasoned about instead
-  (FL-0018's second follow-up): ServiceNow's documented coalesce
-  behavior is a query-then-write pattern, not a documented database-level
-  atomic upsert, so it likely doesn't provide a different guarantee in
-  kind from Candidate B unless backed by a real unique index - which
-  loops back to this same unresolved question. That reasoning is
-  unverified, not a tested result.
+- ~~Whether Import Set + Transform Map coalesce is configurable in this
+  instance and provides an atomic upsert~~ - **still not hands-on
+  attempted in this instance**, by deliberate choice to keep each
+  investigation round bounded, but the reasoning is no longer
+  unverified: independent public ServiceNow community reports describe
+  coalesce producing duplicate records under concurrent/repeated REST
+  submission, consistent with the standing reasoning that it performs
+  an existence check and a write as two separate steps (OB-0023). Not a
+  hands-on test of this specific instance, but no longer purely
+  speculative either.
 - What upstream (Salesforce-side) publishing contract will actually
   govern `Correlation_Id__c` stability across retries in production -
   this project has only ever been its own publisher via test scripts; the
@@ -834,74 +910,93 @@ FL-0017, independent of whichever of A/C is eventually chosen here.
   gap cannot be closed by tuning the local reclaim/reconciliation
   mechanism further - see LL-0017 for why it structurally converges on
   the same open question as Candidate A.
-- **New this round:** does ServiceNow's Table API expose any
-  conditional-write mechanism usable on `POST` (create) - not the
-  schema-level `unique_index` mechanism FL-0018 already exhausted, but
-  a per-request, optimistic-concurrency-style precondition that could
-  let ServiceNow itself reject a write superseded by a newer
-  fencing/generation value? Unresearched - the specific next question
-  for Candidate C (see §7), and notably not the same question FL-0018
-  already asked and left open.
+- ~~Does ServiceNow's Table API expose any conditional-write mechanism
+  usable on `POST` (create)~~ - **answered this round: confirmed no.**
+  Documented as absent across the entire Table API surface (official
+  reference documentation lists every header each operation accepts;
+  none include `ETag`/`If-Match`/`If-None-Match`), and directly
+  confirmed absent by test: `If-None-Match: *` on `POST` is silently
+  ignored, two concurrent creates carrying it both still succeed, and
+  `PUT` cannot create a not-yet-existing record at all (OB-0023,
+  LL-0018). Import Set coalesce and GraphQL mutations were also checked
+  and don't help without writing new ServiceNow server-side code
+  (OB-0023).
+- **New this round, replacing the one above:** is it worth this project
+  writing new ServiceNow server-side code (a Business Rule or Scripted
+  REST API performing the existence-check-and-insert inside one
+  ServiceNow transaction, rather than as two separate HTTP round trips)
+  to close the slow-owner gap - or should this project instead accept a
+  nonzero-probability duplicate window and rely on the existing,
+  validated audit tool (`detect-unprocessed-events.ts`, OB-0012) for
+  detection rather than prevention? Not decided - an architecture-level
+  fork this investigation has arrived at, not resolved (LL-0018, §7).
 
 ---
 
-## 7. Recommendation: smallest next experiment to discriminate between the strongest candidates
+## 7. Recommendation: an architecture-level fork, not another incremental experiment
 
 **Still not selecting an architecture, and explicitly not writing an ADR
-this round - Candidate C's remaining gap turned out to be more
-fundamental than a missing test, not less.** Four of five properties
-this investigation has checked for Candidate C are now confirmed
-protected by direct experiment, independently verified against
-ServiceNow: concurrent initial processing (OB-0017), crash before the
-external side effect (OB-0021), crash after the external side effect
-(OB-0021), and concurrent reclaim (OB-0021). The fifth - a genuinely
-concurrent slow-original-owner race - was reproduced for real this
-round, with independent processes, and **confirmed unsafe**, not left
-open (OB-0022, 3/3 iterations). That is a materially different outcome
-than "untested": the gap is real, deterministic, and - per this round's
-reasoning (LL-0017) - cannot be closed by tuning the local mechanism
-further. It structurally requires the same kind of target-side
-cooperation Candidate A has spent this entire investigation trying and
-failing to establish. Choosing C today would mean choosing a mechanism
-now known to have one specific, real duplicate-producing gap under
-realistic operating conditions (a worker that is merely slow, not
-dead, is not a contrived scenario). Candidate A was deliberately not
-touched this round, per instruction, and remains exactly where the
-prior round left it: one path conclusively closed by platform design,
-the other unexplained after five ruled-out causes (FL-0018, OB-0019).
+this round - but this round changes the *kind* of next step available,
+not just the evidence.** Four of five properties this investigation has
+checked for Candidate C are confirmed protected by direct experiment:
+concurrent initial processing (OB-0017), crash before the external side
+effect (OB-0021), crash after the external side effect (OB-0021), and
+concurrent reclaim (OB-0021). The fifth - a genuinely concurrent
+slow-original-owner race - was reproduced for real, with independent
+processes, and **confirmed unsafe**, not left open (OB-0022, 3/3
+iterations). This round then asked directly whether ServiceNow's API
+surface could close that gap, and the answer is **confirmed no**: no
+conditional-write mechanism exists on the Table API (documented and
+directly tested), Import Set coalesce doesn't provide one either
+(corroborated, if not hands-on tested in this instance), and GraphQL
+offers no built-in primitive to even test without first writing new
+ServiceNow server-side code (OB-0023). Combined with FL-0018/OB-0019's
+finding that the schema-level `unique_index` path is unexplained (not
+merely difficult), **this project has now checked every standard,
+non-custom-scripted door for ServiceNow-side write enforcement, and
+found them all closed or unbuildable** (LL-0018).
 
-**Recommended smallest next experiment - two independent paths, neither
-blocking the other:**
+That is a different kind of result than "the next experiment is
+smaller." There is no smaller ServiceNow-API experiment left to run
+without writing new server-side code - the remaining question is
+whether to make that investment at all, which is an architecture-level
+decision, not an incremental one.
 
-1. **Open a real ServiceNow support case for the wizard's specific,
-   well-characterized symptom** (unchanged, still not pursued further
-   per instruction): a `200`-status "Database Indexes" wizard
-   submission, on a verified-elevated `security_admin` session, against
-   a column with no duplicate values on a trivial brand-new table, that
-   never results in a persisted `sys_index` record. Still the smallest
-   possible action left for Candidate A - outside this project's normal
-   engineering loop, so explicitly not something to block on.
-2. **For Candidate C: investigate (not implement) whether ServiceNow's
-   Table API supports any conditional-write mechanism usable on
-   `POST`** - a different, narrower question than FL-0018's schema-level
-   `unique_index` investigation. ServiceNow documents `sys_mod_count`-
-   based optimistic concurrency for conditional updates
-   (`PATCH`/`PUT`); whether anything comparable exists or could be
-   adapted for `create` so a stale worker's write can be rejected
-   target-side, based on a fencing/generation value, is unresearched.
-   Local-only fencing was deliberately not pursued as a substitute
-   (LL-0017's reasoning: it can narrow the race's window but not
-   provably close it, and this project's standard has been demonstrated
-   safety, not reduced likelihood). This is now the single most
-   load-bearing open question for C.
+**The fork this investigation has arrived at, neither branch decided or
+built:**
 
-Both candidates now have a clear, named, specific blocker rather than a
-vague "needs more investigation" - that is real progress toward an
-eventual ADR, even though this document still stops short of writing
-one. Notably, both blockers now point at the same underlying capability
-question - what can be enforced on the ServiceNow target itself - even
-though they were reached from two candidates the original spike treated
-as independent alternatives (LL-0017).
+1. **Write new ServiceNow server-side code** (a Business Rule or
+   Scripted REST API performing the existence-check-and-insert inside
+   one ServiceNow transaction, rather than as two separate HTTP round
+   trips) to test whether the platform's own database transaction
+   semantics can close the gap that no client-reachable API can. A
+   real, different proposal from anything tested so far - and a real
+   commitment (platform development, update sets, code living on the
+   target instead of this repository) that hasn't been made yet.
+2. **Accept a nonzero-probability duplicate window and lean on
+   detection instead of prevention** - this project already has a
+   validated audit tool (`detect-unprocessed-events.ts`, OB-0012) that
+   correctly classifies `DUPLICATE`, not just `GAP`. Pairing a chosen
+   candidate with that existing capability, rather than continuing to
+   search for a prevention mechanism that may not exist without new
+   platform code, is a legitimate position - not a concession, but a
+   different tradeoff.
+
+Candidate A remains exactly where the prior round left it, deliberately
+untouched again this round per instruction: one path (raw manual
+insert) conclusively closed by platform design; the other (the
+supported wizard) unexplained after five ruled-out causes. **Opening a
+real ServiceNow support case for that specific, well-characterized
+symptom remains the smallest action left for Candidate A** - unchanged,
+still not pursued further in-repo, outside this project's normal
+engineering loop.
+
+Both candidates' remaining blockers now point at the same underlying
+fact: no target-side write-enforcement capability is available to this
+project without writing new ServiceNow server-side code. Deciding
+whether that investment is worth making - for either candidate - is the
+next decision, not another experiment against the same set of doors
+this round just finished checking.
 
 ---
 
@@ -915,7 +1010,7 @@ that evidence would violate the same discipline this project has applied
 throughout (`CLAUDE.md`: "Do not manufacture alternatives merely to make
 an ADR appear sophisticated").
 
-Across the seven follow-up rounds summarized at the top of this
+Across the eight follow-up rounds summarized at the top of this
 document, every artifact added has been investigation tooling, never
 implementation, and every one remains true today: **not referenced by
 `src/`, not wired into the subscriber or `incidentAdapter.ts`, and not
@@ -926,11 +1021,13 @@ Incident, and a disposable custom table (`u_gv_index_test`) used to
 isolate FL-0018's index-creation failure from Incident-table specifics
 - both left in place as evidence trail, neither referenced by any
 runtime code. In this repository: `scripts/test-servicenow-concurrent-idempotency.ts`;
-`scripts/lib/idempotencyStore.ts` (the Candidate C prototype - a
-`node:sqlite` file, gitignored, with exactly three functions added
+`scripts/test-servicenow-conditional-create.ts` (this round's probe -
+a standalone HTTP-header investigation, no store, no state, nothing to
+wire in); `scripts/lib/idempotencyStore.ts` (the Candidate C prototype
+- a `node:sqlite` file, gitignored, with exactly three functions added
 across the whole investigation: `acquire`, `reclaim`, `markCompleted`,
-plus `getRecord`) and its five experiment scripts
-(`test-durable-state-concurrent-idempotency.ts`,
+plus `getRecord`, none touched this round) and its five experiment
+scripts (`test-durable-state-concurrent-idempotency.ts`,
 `test-durable-state-crash-gap.ts`, `test-durable-state-reclaim-ambiguity.ts`,
 `test-durable-state-reclaim-reconciliation.ts`,
 `test-durable-state-slow-worker-race.ts`, the last of which spawns
@@ -943,7 +1040,12 @@ deliberately stopped short of building it, per each round's explicit
 instruction: no lease/heartbeat/fencing framework, no generalized
 recovery worker, no retry mechanism, no target-side uniqueness
 mechanism, no local-only fencing token proposed as a substitute for
-target-side enforcement. The slow-original-owner race was analyzed,
-reproduced, and confirmed unsafe (OB-0022) - not built around, patched,
-or quietly left unresolved once the tooling existed to actually test
-it.
+target-side enforcement, and this round, no new ServiceNow server-side
+code (Business Rule or Scripted REST API) written to test the
+architecture-level idea its own findings pointed to (§7) - that remains
+a decision to make, not a mechanism to build yet. The slow-original-owner
+race was analyzed, reproduced, and confirmed unsafe (OB-0022), and the
+question of whether ServiceNow's API surface could close it was asked
+directly and answered - confirmed no (OB-0023) - not built around,
+patched, or quietly left unresolved once the tooling existed to
+actually test it.

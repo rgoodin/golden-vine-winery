@@ -181,6 +181,21 @@ package (premature until a second integration needs the same thing — see
   incomplete. Full analysis:
   `docs/architecture/0001-reliability-architecture-spike.md` §4
   ("C-slow-owner-race"), `docs/devex/lessons-learned.md` LL-0017.
+- `scripts/test-servicenow-conditional-create.ts` — direct follow-up:
+  does ServiceNow's Table API (or another directly usable API) let the
+  *target* atomically reject a stale create - not a client-side lookup
+  (OB-0014) or a client-side fencing check (OB-0022), but ServiceNow's
+  own transaction? Probes real `ETag`/`Last-Modified` header presence,
+  whether `If-None-Match: *` on `POST` has any effect, and whether `PUT`
+  can create a not-yet-existing record. Result: **confirmed no** - no
+  version header exists to condition on, `If-None-Match: *` is silently
+  ignored (two concurrent creates carrying it both still succeed,
+  independently verified), and `PUT` to an unused `sys_id` returns
+  `404` (update-only, no upsert path). Matches ServiceNow's own official
+  Table API reference, which documents no conditional-request headers
+  for any operation. Full analysis:
+  `docs/architecture/0001-reliability-architecture-spike.md` §3c,
+  `docs/devex/lessons-learned.md` LL-0018.
 - `EXPERIMENT_CRASH_BEFORE_CHECKPOINT=true npm run dev` — deterministic
   test-only crash point in `pubsubClient.ts`: exits right after an event
   is successfully processed but before its checkpoint is persisted, for
@@ -241,11 +256,18 @@ and
   "slow worker, not dead" race - using two real independent processes,
   and confirmed it **unsafe**: 2 real Incidents result every time (3/3
   iterations), and the local record afterward is left actively wrong,
-  not just incomplete (OB-0022). That gap can't be closed by tuning the
-  local mechanism further - it converges on the same target-side
-  question Candidate A has been unable to answer. **No architecture has
-  been chosen and no fix has been built** - see the spike doc's §7 for
-  the current recommended next step for each candidate.
+  not just incomplete (OB-0022). Asking directly whether ServiceNow's
+  own API surface could close that gap got a clean answer:
+  **confirmed no** - no conditional-write mechanism exists on the Table
+  API (documented and directly tested), and neither Import Set coalesce
+  nor GraphQL mutations help without writing new ServiceNow server-side
+  code (OB-0023). This project has now checked every standard,
+  non-custom-scripted door for target-side write enforcement - the
+  remaining question is an architecture-level fork (write new
+  ServiceNow server-side code, or accept a duplicate window and lean on
+  the existing audit tool for detection), not another incremental
+  experiment. **No architecture has been chosen and no fix has been
+  built** - see the spike doc's §7.
 - Giving the audit tool its own incremental "last audited position" so
   repeat runs don't always re-sweep from `EARLIEST` (LL-0011) - proposed,
   not built.

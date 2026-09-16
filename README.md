@@ -96,10 +96,15 @@ integration-owned durable-state store: concurrent processing, crash
 recovery, and concurrent recovery attempts are all now solved and
 independently verified - but a genuinely concurrent "still running, not
 actually dead" race, tested for real with two independent processes,
-reliably produces a duplicate Incident, and closing that gap turns out
-to depend on the same open question as the ServiceNow side. Both
-candidates now have a specific, confirmed blocker; no architecture has
-been chosen.
+reliably produces a duplicate Incident. Asking directly whether
+ServiceNow's own API could close that gap got a clean answer: no
+conditional-write mechanism exists, confirmed by ServiceNow's official
+documentation and by direct testing. This project has now checked every
+standard door for ServiceNow-side write enforcement; what's left is a
+real architecture decision - write new ServiceNow server-side code, or
+accept a duplicate window and rely on the existing audit tool for
+detection - not another incremental experiment. Both candidates now
+have a specific, confirmed blocker; no architecture has been chosen.
 
 See [`CLAUDE.md`](./CLAUDE.md) ("Current Repository State") for the
 up-to-date summary,
