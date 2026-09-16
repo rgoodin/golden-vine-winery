@@ -429,6 +429,97 @@ material the next several rounds of work are built from, followed
 through to a real, tested, manually-triggered composition rather than
 left as an open question indefinitely.
 
+### DP-0021: An interface built for one reason quietly satisfied a later, different requirement
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0007, operational-policy design)
+**Perspective:** Developer
+
+The previous round required `--recover=<ms>` rather than a bare
+`--recover` flag so that recovery could never be triggered by accident
+(DP-0018). This round needed audit and recovery to be independently
+schedulable, and found that requirement already satisfied - no code
+change - by the same flag. Nobody designed the flag with scheduling in
+mind; it paid off anyway, because "make the dangerous thing require an
+explicit, deliberate argument" and "make the dangerous thing separable
+from the safe thing" turned out to be the same discipline applied
+twice. Worth remembering the next time a small interface decision looks
+like it's only solving today's problem - a genuinely explicit interface
+tends to keep being explicit in ways you didn't plan for yet.
+
+### DP-0022: A number that was safe because one specific person understood its history is not a policy - it's a story that hasn't been written down yet
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0007, operational-policy design)
+**Perspective:** Dojo Instructor
+
+`--recover=2000` has been typed, correctly, by whoever ran it in every
+round so far - because that person had just lived through OB-0022 and
+understood precisely what the number meant and didn't mean. That
+understanding is not in the code. It's not even fully in the comments.
+It's in this project's own accumulated history, which a second
+developer inheriting this capability will not have walked through the
+same way. The moment automation is even *considered*, that gap stops
+being harmless: a scheduled `--recover=2000` would be Developer #1's
+lived judgment silently frozen into Developer #2's default, presented
+as a working number rather than a placeholder that was never meant to
+survive contact with production. ADR 0007's refusal to pick a cadence
+or a threshold isn't caution for its own sake - it's the recognition
+that teaching a *number* is not the same as teaching the *reasoning*
+that number depended on, and a Golden Path has to transmit the
+reasoning, not just a value that happened to work in a test. The
+concrete teaching artifact this round produces is exactly that
+separation, written down where a second developer can find it before
+they need it, rather than after something goes wrong.
+
+### DP-0023: This project's first "own the policy, not just the code" platform requirement
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0007, operational-policy design)
+**Perspective:** Platform Engineer
+
+Every prior reusable thing this project has built - `idempotencyStore.ts`,
+`incidentReconciliation.ts`, the recovery/audit composition - has been
+code: something a Platform Engineer packages once and developers
+consume unchanged. `staleAfterMs`, once scheduled, is a different kind
+of asset: a configuration value that only means something in light of
+measured evidence (real ServiceNow call latency) and a documented
+justification for the safety margin chosen above it. That's not a
+module to extract - it's a policy to own, with its own evidence trail,
+that has to be re-justified if the evidence it rests on changes (ADR
+0007's own "when to revisit" - built to be reopened deliberately, not
+frozen accidentally). Recognizing this as a distinct category of
+platform responsibility, separate from reusable code, is itself the
+deliverable of this round from this perspective - nothing needed
+building yet, but the next round that *does* build the scheduler now
+knows it's shipping a policy artifact alongside the mechanism, not just
+wiring a cron job around an existing script.
+
+### DP-0024: The project just demonstrated the difference between "this works" and "this is safe to hand to someone else" - and chose not to collapse them
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0007, operational-policy design)
+**Perspective:** Dojo Director
+
+OB-0028 answered a mechanical question: can the audit detector and the
+recovery function be composed correctly? Yes, proven end-to-end. This
+round asked a different question entirely: is it safe to let that
+composition run without anyone watching it? The honest answer was no,
+not yet - not because the mechanism is wrong, but because part of what
+made every run so far safe was a human who understood OB-0022 choosing
+when to run it and what threshold to trust. A less disciplined version
+of this project would have read OB-0028's success as license to
+schedule immediately - "it works, wire up cron." Instead this round
+separated *mechanical correctness* from *operational safety* as two
+different questions requiring two different kinds of evidence, and
+refused to answer the second with the first. That is precisely the
+distinction between an integration that works and a Golden Path
+capability - the second demands that its safety assumptions be
+legible and owned by the platform, not inherited tacitly from whoever
+happened to build it. This is the clearest single moment so far where
+the project is visibly building the *Path*, not just the integration
+the Path is supposed to generalize from.
+
 ---
 
 <!-- Add new entries above this line, most recent first. -->

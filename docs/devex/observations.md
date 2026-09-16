@@ -1553,4 +1553,52 @@ composition looked like from each DevEx Dojo role.
 
 ---
 
+### OB-0029: Before scheduling recovery, a bounded policy design asks what automation would actually be allowed to do — ADR 0007 decides the contract, not a scheduler
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (bounded operational-policy design)
+**Category:** architecture / operational policy
+
+OB-0028 proved the manual audit/recovery composition works end-to-end.
+The obvious next move - schedule it - was deliberately not taken.
+Automating `--recover=<staleAfterMs>` converts a value a developer
+currently types with judgment attached into a standing platform policy
+governing when ownership may be taken from a possibly-still-live worker
+(OB-0022). This round asked what has to be true before that conversion
+is safe, without building the thing that would need it.
+
+[ADR 0007](../decisions/0007-tier1-scheduled-recovery-operational-contract.md)
+records the answer as a contract, not a number: cadence and
+`staleAfterMs` both require evidence this project doesn't have yet
+(measured latency, measured sweep-anomaly frequency) and are
+**explicitly not derived from the 2000ms experimental value** used
+throughout OB-0020 through OB-0028. Overlapping runs are resolved as a
+load/observability concern (skip-if-running), not a correctness one -
+the atomic reclaim gate already prevents double-recovery of the same
+operation regardless of scheduling (OB-0017, OB-0021 Case 3, OB-0026
+Case 3, OB-0028). A zero-event sweep (FL-0026) must gate out mutating
+recovery for that run rather than being read as a confirming "nothing
+to recover" result. Failure handling relies on the next scheduled run
+as the retry, explicitly dependent on today's full-history resweep
+behavior (no internal retry logic invented). Most notably: **audit and
+recovery must be independently schedulable, and the existing
+`--recover=<ms>` flag interface already provides that separation for
+free** - no refactor of `detect-unprocessed-events.ts` is required
+despite FL-0027's growing-responsibility concern, because ADR 0005's
+mandatory detection requirement must not be blocked on evidence
+recovery automation still needs.
+
+**Recommends the smallest next automation slice: schedule audit-only,
+not recovery.** It satisfies ADR 0005's mandatory floor immediately, at
+zero mutation risk, and is also how this project would gather the
+latency/anomaly-frequency evidence ADR 0007 requires before scheduled
+recovery could be responsibly proposed at all - not a smaller version
+of the eventual goal, but the actual prerequisite for it.
+
+**Nothing was implemented this round** - no scheduler, no
+configuration mechanism for `staleAfterMs`, no refactor of the audit
+script, no change to any of the mechanisms OB-0028 verified.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

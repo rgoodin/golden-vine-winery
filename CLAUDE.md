@@ -167,10 +167,33 @@ be a transient cold-start artifact instead (FL-0026) - worth re-checking
 before trusting, especially now that it can also mean "no recovery
 attempted."
 
+**Before scheduling that composition, a bounded operational-policy round
+asked what automation would actually be allowed to do** (OB-0029).
+[ADR 0007](docs/decisions/0007-tier1-scheduled-recovery-operational-contract.md)
+decides the contract, not a scheduler: cadence and `staleAfterMs` both
+require latency/frequency evidence this project doesn't have yet, and
+are **explicitly not derived from the 2000ms value used experimentally
+throughout OB-0020–OB-0028**; overlapping runs are a load/observability
+concern to resolve with skip-if-running, not a correctness risk (the
+atomic reclaim gate already prevents double-recovery regardless of
+scheduling); a zero-event sweep (FL-0026) must gate out mutating
+recovery for that run rather than read as "nothing to recover";
+failures fail loudly with no internal retry, relying on the next
+scheduled run instead. Most notably: **audit and recovery must be
+independently schedulable, and the existing `--recover=<ms>` flag
+already provides that separation for free** - no refactor of
+`detect-unprocessed-events.ts` is required despite FL-0027's
+growing-responsibility concern. Recommends scheduling **audit-only**
+first - it satisfies ADR 0005's mandatory detection floor immediately,
+at zero mutation risk, and is how this project would gather the
+evidence scheduled recovery still needs. Nothing was implemented this
+round - no scheduler, no configuration mechanism, no code change at all.
+
 Also proposed but deliberately not built: giving the audit tool its own
 incremental "last audited position" so repeat runs don't always re-sweep
-from `EARLIEST` (LL-0011). Not yet built: any scheduler or automatic
-trigger for this recovery mode, any Tier 2 investigation, and tests. See
+from `EARLIEST` (LL-0011). Not yet built: any scheduler (for audit or
+recovery), a configuration mechanism for `staleAfterMs`, any Tier 2
+investigation, and tests. See
 `services/integration-service/README.md` for current status and
 `docs/devex/dojo-perspectives.md` for what these Enablement rounds
 looked like from each DevEx Dojo role.

@@ -126,8 +126,23 @@ real Salesforce and ServiceNow - a duplicate is never touched by it, and
 an unrecoverable gap stays a gap rather than being marked resolved just
 because recovery was requested. What's still missing is anything that
 triggers this automatically - today an operator has to run it
-deliberately - a deliberate, documented gap, not an oversight, and the
-next smallest step.
+deliberately.
+
+Before automating it, this project asked what automation should
+actually be *allowed* to do, rather than jumping straight to a
+scheduler: [ADR 0007](./docs/decisions/0007-tier1-scheduled-recovery-operational-contract.md)
+decides that question as a contract, not a cron job. It doesn't pick a
+schedule or a staleness threshold - both need real evidence this
+project doesn't have yet, and neither may simply inherit the value used
+experimentally throughout earlier rounds. It does decide that audit and
+recovery must be independently schedulable (the existing interface
+already allows this, no refactor needed), that a suspiciously empty
+Salesforce sweep must block recovery rather than be read as "nothing to
+do," and that failures should fail loudly rather than retry silently.
+The recommended next step is smaller than "add a scheduler": schedule
+detection only, which is mandatory under Tier 1 already and carries no
+mutation risk - and is how the evidence for scheduling recovery would
+actually get gathered.
 
 See [`CLAUDE.md`](./CLAUDE.md) ("Current Repository State") for the
 up-to-date summary,

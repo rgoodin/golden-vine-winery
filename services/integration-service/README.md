@@ -345,11 +345,35 @@ because recovery was requested; a `DUPLICATE` is never routed through
 recovery at all - confirmed by the absence of any recovery attempt in
 its output, not just by inspection.
 
+**Before scheduling that composition, a bounded operational-policy
+round decided what automation would actually be allowed to do**
+(`docs/devex/observations.md` OB-0029,
+[ADR 0007](../../docs/decisions/0007-tier1-scheduled-recovery-operational-contract.md)).
+No scheduler was built - the round produced a contract instead: cadence
+and `staleAfterMs` both need latency/frequency evidence this project
+doesn't have yet, and neither may simply become the 2000ms value used
+experimentally throughout OB-0020–OB-0028; overlapping runs are a
+load/observability concern (skip-if-running), not a correctness risk,
+since the atomic reclaim gate already prevents double-recovery of the
+same operation regardless of scheduling; a zero-event sweep (FL-0026)
+must block mutating recovery for that run rather than be read as
+"nothing to recover"; failures fail loudly with no internal retry,
+relying on the next scheduled run instead. **Audit and recovery must be
+independently schedulable, and the existing `--recover=<ms>` flag
+already provides that separation for free** - no refactor of
+`detect-unprocessed-events.ts` is required despite FL-0027's
+growing-responsibility concern. The recommended next step is scheduling
+**audit-only** - it satisfies ADR 0005's mandatory detection floor
+immediately, at zero mutation risk, and doubles as how this project
+would gather the evidence scheduled recovery still needs.
+
 **Still not wired in — deliberately:**
 
-- Any scheduler or automatic trigger for `--recover` mode (e.g. tied to
-  a regular audit schedule) - a distinct, larger Enablement decision,
-  not yet scoped or built.
+- Any scheduler, for audit or recovery - ADR 0007 defines what one
+  would have to do; none has been built yet.
+- A configuration mechanism for `staleAfterMs` (it remains a
+  CLI-supplied value, appropriate only for manually-supervised runs per
+  ADR 0007).
 - The audit tool (`detect-unprocessed-events.ts`) on any automatic
   schedule - still on-demand only.
 - Genuine multi-instance concurrency testing at the real entry point -
