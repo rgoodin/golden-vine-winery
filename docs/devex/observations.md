@@ -1439,6 +1439,12 @@ small follow-up ADR is recommended before this is actually implemented
 choice is recorded deliberately rather than settled implicitly by
 whichever code happens to get written first - not written this round.
 
+**Follow-up:** written as
+[ADR 0006](../decisions/0006-tier1-recovery-payload-sourcing.md) -
+formalizes the Approach A recommendation above, records what it does
+and does not guarantee, and defines the `GAP`-on-unlocatable-event
+behavior. Still not implemented; see the ADR's own "Next step."
+
 **What this round did not do, per its explicit scope:** connect the
 audit tool to recovery automatically, implement Approach B or C, or
 change any existing production code path (the only new code is the

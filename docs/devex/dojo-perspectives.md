@@ -274,6 +274,82 @@ discipline doesn't only show up for the big architectural forks; it's
 holding at the scale of a single implementation detail, three rounds
 into Enablement, without anyone having to re-invoke it deliberately.
 
+### DP-0013: The ADR required no code change - it made an already-true contract explicit rather than triggering new work
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0006)
+**Perspective:** Developer
+
+Writing ADR 0006 didn't change what `recoverStaleDistributorOnboardingOperation()`
+does - it already sourced its payload from Salesforce replay, exactly
+as the ADR now formally decides. What the ADR actually added for a
+developer is the explicit contract around that existing behavior: what
+it does and doesn't guarantee, and what must happen when it fails
+(stays a `GAP`, never silently treated as recovered). Not every ADR
+should be read as "now go implement this" - some, like this one, exist
+to make a decision durable and citable that the code already embodies,
+so the next developer touching this path doesn't have to reverse-engineer
+the reasoning from OB-0027 or guess whether the current behavior was
+deliberate.
+
+### DP-0014: Writing down the failure fallback was the ADR's most load-bearing sentence, not the approach selection
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0006)
+**Perspective:** Dojo Instructor
+
+Choosing Approach A was, by this point, the easy part - OB-0027's
+evidence pointed at it clearly. The sentence that actually protects a
+future developer is the one about what happens when the source event
+can't be located: it must remain an observable `GAP`, never silently
+treated as recovered or completed, with no invented fallback. That
+constraint was true in spirit before this ADR (it follows directly from
+ADR 0005's own promise), but it had never been stated as a rule
+specific to this failure mode. Teaching a developer "here's the chosen
+approach" is necessary but not sufficient - teaching them "here's the
+one thing you must never do when it doesn't work" is what actually
+prevents a plausible-looking shortcut (e.g., "just create an Incident
+with placeholder data so the operation isn't stuck") from quietly
+undermining ADR 0005 months from now.
+
+### DP-0015: A named "when to revisit" section is a reusable ADR pattern, not just content specific to this decision
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0006)
+**Perspective:** Platform Engineer
+
+ADR 0005 discusses risk and residual gaps in its Consequences section,
+but doesn't name concrete, checkable conditions for when the decision
+itself should be reopened. ADR 0006 does: retention proving
+insufficient, scan cost becoming operationally unacceptable, or a new
+Salesforce capability changing the cost comparison. That's a small
+structural addition worth carrying into future ADRs generally, not just
+this one - it turns "revisit this if circumstances change" from a vague
+intention into something a future developer (or this project's own next
+Observation round) can actually check against, rather than having to
+independently notice the decision has gone stale.
+
+### DP-0016: The project's ADR process just proved it scales down, not only up
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0006)
+**Perspective:** Dojo Director
+
+ADR 0005 was a large decision - eight rounds of investigation, four
+alternatives, a tiered contract. ADR 0006 is a small one - a single
+implementation detail exposed by two Enablement rounds of real friction,
+resolved in one bounded investigation. Both went through the same
+discipline: evidence first, alternatives compared on the same
+dimensions, a decision recorded with explicit non-guarantees, a next
+step recommended but not taken. That a lightweight version of the same
+process produced a genuinely useful, citable artifact for a much
+smaller question is the real signal here - it means this project's
+decision-making process isn't reserved for rare, big architectural
+forks that justify the overhead. It's cheap enough to invoke whenever a
+real fork appears, which is exactly what keeps a Golden Path's
+decisions traceable instead of accumulating as implicit, undocumented
+choices buried in code.
+
 ---
 
 <!-- Add new entries above this line, most recent first. -->

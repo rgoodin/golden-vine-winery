@@ -307,23 +307,30 @@ confirmed from the Pub/Sub proto itself), and this project's actual
 retention window for the topic remains unestablished. An event's own
 replay ID does **not** let you refetch that event later - confirmed
 directly, not assumed from Salesforce's documented "start after"
-semantics. **Recommends source-owned replay** (no code change, reuses
-already-validated tooling, keeps the reliability store's
-target/source-agnostic boundary intact) over persisting the payload
-locally (reopens that boundary, adds a real schema-versioning problem)
-or a minimal durable reference (looked cheap, isn't - the naive version
-doesn't work, and a correct one needs new plumbing this codebase
-doesn't have). **Recommends a small follow-up ADR** before implementing
-the automatic connection, since ADR 0005 didn't address this question.
-Neither the automatic trigger nor any of the three approaches has been
-built.
+semantics.
+
+**That investigation is now decided:
+[ADR 0006](../../docs/decisions/0006-tier1-recovery-payload-sourcing.md)
+adopts source-owned replay** - Tier 1 recovery keeps sourcing its
+payload by scanning Salesforce's retained history at recovery time (no
+code change required; `recoverStaleDistributorOnboardingOperation()`
+already matches this decision as-is), over persisting the payload
+locally (reopens the target/source-agnostic boundary, adds a real
+schema-versioning problem) or a minimal durable reference (looked
+cheap, isn't - the naive version doesn't work, and a correct one needs
+new plumbing this codebase doesn't have). The ADR is explicit about
+what this does *not* guarantee (no permanent durability, no
+random-access retrieval, dependent on an unestablished retention
+horizon) and defines the fallback: an operation whose source event
+can't be located stays an observable `GAP`, never silently treated as
+recovered.
 
 **Still not wired in — deliberately:**
 
 - Anything that triggers recovery automatically (a scheduled worker, or
   wiring the audit tool's `GAP` output to a recovery call) - this is the
-  smallest next Tier 1 Enablement step, not yet done. A small follow-up
-  ADR on recovery-payload sourcing (OB-0027) is recommended before it.
+  smallest next Tier 1 Enablement step, not yet done. ADR 0006's own
+  "Next step" describes it; not implemented.
 - The audit tool (`detect-unprocessed-events.ts`) on any automatic
   schedule - still on-demand only.
 - Genuine multi-instance concurrency testing at the real entry point -

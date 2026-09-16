@@ -129,15 +129,27 @@ you refetch that event later (confirmed directly, not just from docs —
 `ReplayPreset.CUSTOM` resumes *after* the given position). **Recommends
 Approach A** (no code change, reuses already-validated tooling,
 preserves the target/source-agnostic boundary the reliability store has
-held since OB-0025) **and recommends a small follow-up ADR** before
-implementing the automatic connection, since this is a real
-architectural decision ADR 0005 didn't address. Neither the automatic
-trigger nor any of the three approaches has been implemented.
+held since OB-0025).
+
+**That recommendation is now decided:
+[ADR 0006](docs/decisions/0006-tier1-recovery-payload-sourcing.md)
+adopts Approach A** — Tier 1 recovery continues sourcing its payload by
+scanning Salesforce's retained replay history at recovery time; the
+reliability store persists no business payload and no Salesforce
+position reference. The ADR is explicit about what this does *not*
+guarantee (no permanent payload durability, no random-access event
+retrieval, dependent on an unestablished retention horizon) and defines
+the fallback when a source event can't be located: it remains an
+observable `GAP`, never silently treated as recovered. Nothing from
+this ADR has been implemented — `recoverStaleDistributorOnboardingOperation()`
+already matches the decision as-is (OB-0026), so no code change is
+required to conform to it.
 
 Also proposed but deliberately not built: giving the audit tool its own
 incremental "last audited position" so repeat runs don't always re-sweep
-from `EARLIEST` (LL-0011). Not yet built: the recovery-payload ADR, an
-automatic recovery trigger, any Tier 2 investigation, and tests. See
+from `EARLIEST` (LL-0011). Not yet built: connecting the audit tool's
+`GAP` output to a recovery call (ADR 0006's own recommended next step),
+any Tier 2 investigation, and tests. See
 `services/integration-service/README.md` for current status and
 `docs/devex/dojo-perspectives.md` for what these Enablement rounds
 looked like from each DevEx Dojo role.

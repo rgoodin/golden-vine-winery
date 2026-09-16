@@ -111,14 +111,16 @@ recovery (reclaim plus ServiceNow reconciliation) are all wired into
 the real service, replacing the old direct event-to-ServiceNow path,
 and verified against real Salesforce and ServiceNow rather than only
 against the experimental prototypes. Before wiring recovery up
-automatically, a small bounded investigation asked where recovery's
-payload should come from in the first place - source-owned replay,
-integration-owned storage, or a minimal Salesforce-position reference -
-and answered it with two direct experiments rather than assumption,
-recommending the first option and a small follow-up ADR before it's
-implemented. What's still missing is anything that triggers recovery
-automatically - today it has to be invoked deliberately, with the
-original event in hand - a deliberate, documented gap, not an
+automatically, a bounded investigation asked where recovery's payload
+should come from in the first place, and
+[ADR 0006](./docs/decisions/0006-tier1-recovery-payload-sourcing.md)
+decided it: source it from Salesforce's retained replay history at
+recovery time, rather than persisting business payload or a Salesforce
+position reference locally - with an explicit fallback (an unlocatable
+source event stays an observable, unresolved gap, never silently
+treated as recovered). What's still missing is anything that triggers
+recovery automatically - today it has to be invoked deliberately, with
+the original event in hand - a deliberate, documented gap, not an
 oversight, and the next smallest step.
 
 See [`CLAUDE.md`](./CLAUDE.md) ("Current Repository State") for the
