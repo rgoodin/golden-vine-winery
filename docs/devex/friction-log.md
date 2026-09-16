@@ -1238,4 +1238,100 @@ be re-derived when that step is picked up.
 
 ---
 
+### FL-0024: Recovery needs the original event payload, but the durable store deliberately doesn't keep one
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0005, Tier 1)
+
+#### Observation
+
+Writing `recoverStaleDistributorOnboardingOperation()`: the "absent"
+branch of ADR 0005's recovery diagram has to call
+`createOnboardingIncident()`, which needs the full event - distributor
+name, contact, sales owner, opportunity, account - not just a
+business-operation ID.
+
+#### Friction
+
+`business_operations` (the table `src/reliability/idempotencyStore.ts`
+owns) stores only the ID, status, and timestamps - by design, per
+OB-0025/this file's own idempotencyStore.ts header comment, to keep
+that module ignorant of any target's data shape. But that means a stale
+`in_flight` row, on its own, carries no information sufficient to
+recreate the Incident it was supposed to produce. The recovery function
+can't be "just give it the ID and it figures out the rest" - it has to
+be handed the event again from somewhere.
+
+#### Impact
+
+Not a blocker, but a real design constraint that wasn't obvious until
+implementation forced it: recovery is not self-contained the way
+`processDistributorOnboardingEvent()` is. It depends on a second,
+already-existing durable source for the event payload - Salesforce
+itself, via the replay capability this project already validated
+(`pubsubClient.ts`'s `replayRange()`, OB-0011) - rather than needing
+`idempotencyStore.ts` to duplicate that storage locally. This round's
+test script (`scripts/test-production-recovery.ts`) sidesteps the
+question by constructing the event directly, since no replay-driven
+caller exists yet; a real recovery worker will need to actually perform
+that replay to get the event before it can call this function.
+
+#### Possible Enablement
+
+None yet. Worth remembering when the next Enablement step (a
+recovery-triggering worker) is scoped: it needs to pair a `GAP`/stale
+finding with an actual replay of the corresponding Salesforce event,
+not just the correlationId, before it can call
+`recoverStaleDistributorOnboardingOperation()`.
+
+---
+
+### FL-0025: A stale in-flight operation is invisible to normal redelivery - recovery only happens if something deliberately calls it
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0005, Tier 1)
+
+#### Observation
+
+Given FL-0023's resolution (both branches of
+`processDistributorOnboardingEvent()` checkpoint forward normally): what
+happens when Salesforce naturally redelivers an event whose business
+operation is genuinely stuck `in_flight` from an earlier crash?
+
+#### Friction
+
+`acquireOperation()` sees the existing row, returns `false`, and
+`processDistributorOnboardingEvent()` takes its "already owned - not
+creating another Incident" branch, logs it, and returns normally -
+exactly the same as if the operation had completed successfully. A
+naturally-redelivered event for a genuinely stuck operation is
+therefore silently and permanently absorbed by the normal path; it
+never reaches `reclaimOperation()`, because nothing on the normal path
+calls it. Recovery only happens for an operation that something
+external deliberately decides to recover - normal event traffic,
+including Salesforce's own redelivery of the exact event that could
+supply everything recovery needs (see FL-0024), does not trigger it.
+
+#### Impact
+
+This sharpens, rather than closes, the risk FL-0023 already named as
+deliberate and known: a stuck operation stays stuck not just until
+reclaim exists as a mechanism (true as of last round), but until
+something - today, nothing - actually invokes it for that specific
+operation. The audit tool (`detect-unprocessed-events.ts`) can already
+identify these as `GAP`, but classifying a gap and recovering it are
+still two disconnected steps; closing that gap is exactly the
+"automatic (rather than on-demand) detection trigger" already named as
+not-yet-built in `CLAUDE.md`, now sharpened into "and something has to
+actually call recovery when it fires."
+
+#### Possible Enablement
+
+None yet - explicitly out of scope for this round (no scheduled/
+automatic recovery). Recorded so the next Enablement step doesn't have
+to rediscover that classifying a gap and recovering it are separate
+concerns.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

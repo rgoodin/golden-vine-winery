@@ -112,6 +112,88 @@ that reveal it was less general than it looked with only one consumer.
 That question is open, not answered, and shouldn't be treated as
 answered until a second integration actually exists.
 
+### DP-0005: The durable store's "thinness" is a decision a developer has to actively learn, not something recovery's interface makes obvious
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0005, Tier 1, stale-operation recovery)
+**Perspective:** Developer
+
+Implementing recovery surfaced something the first Enablement round's
+scope didn't force into view: `idempotencyStore.ts` stores only an ID,
+a status, and timestamps - never the event payload itself (FL-0024).
+That's the right call (DP-0003 already flagged target-agnosticism as
+the reason the store should stay generic), but it means
+`recoverStaleDistributorOnboardingOperation()` can't be called with just
+a business-operation ID the way a developer's first instinct would
+expect - it needs the whole original event, sourced from somewhere else
+entirely (Salesforce's own replay). A developer picking this up cold
+would reasonably try `recover(businessOperationId)` first and be
+surprised it isn't offered. The function signature (`event`, not `id`)
+is the actual documentation of this constraint - but only if a
+developer stops to ask why, rather than assuming it's an oversight to
+route around.
+
+### DP-0006: "Recovery exists now" does not mean "recovery happens now" - and that gap is easy to assume away
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0005, Tier 1, stale-operation recovery)
+**Perspective:** Dojo Instructor
+
+FL-0025 is exactly the kind of assumption a developer - or, this round,
+the implementer - makes silently and has to be walked back from: once
+`recoverStaleDistributorOnboardingOperation()` exists and works
+(OB-0026 proves it does, against real ServiceNow), it is tempting to
+treat the recovery *problem* as solved. It isn't - nothing yet calls
+that function for a real stuck operation; Salesforce's own natural
+redelivery of the same event runs straight into the ordinary
+"already-owned, do nothing" branch instead. The teaching point isn't
+"build the scheduler" (explicitly out of scope) - it's that a developer
+evaluating whether Tier 1 protects a given business operation needs to
+ask two separate questions, not one: *can* this be recovered (yes, as
+of this round), and *will* anything actually recover it (no, not yet).
+Conflating those two is the exact mistake this round almost made before
+writing FL-0025 down.
+
+### DP-0007: The reliability/target boundary chosen last round held up under a second real extension, not just in principle
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0005, Tier 1, stale-operation recovery)
+**Perspective:** Platform Engineer
+
+DP-0003 named `idempotencyStore.ts` as a platform-capability candidate
+*because* its API had nothing ServiceNow-specific in it. This round is
+the first real test of that claim: extending it only required adding
+`reclaimOperation()` - itself just as target-agnostic as `acquire`/
+`complete` - while everything ServiceNow-specific (querying by
+`correlation_id`, deciding what "found" means) went into a brand-new
+module, `src/servicenow/incidentReconciliation.ts`, that the generic
+store never imports or knows about. That's a concrete signal, not just
+an aspiration, that a second target's reconciliation would be its own
+small module beside this one rather than a modification to it. The
+`src/reliability/` vs `src/servicenow/` split is worth treating as the
+actual pattern, not just this integration's file layout, once a second
+target exists to prove it for real (Phase 5).
+
+### DP-0008: Enablement's own friction just produced a new Observation - the cycle is already running its next lap, not a one-time loop
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0005, Tier 1, stale-operation recovery)
+**Perspective:** Dojo Director
+
+DP-0004 framed the previous round as the project's first completed
+Observation → Enablement lap. This round shows what happens next: FL-0025
+(gap detection and gap recovery are two disconnected concerns) is not
+something the architecture spike, ADR 0005, or last round's Enablement
+work predicted - it only became visible by actually building recovery
+and asking what triggers it. That is Enablement generating a fresh,
+concrete Observation, exactly as `CLAUDE.md`'s cycle diagram claims it
+should, without anyone deciding in advance to look for it. The
+systemic takeaway isn't about this specific gap - it's that the cycle
+doesn't need to be manually restarted between phases; implementing the
+previous phase's decision is itself what surfaces the next one's
+material, provided each round keeps writing that friction down instead
+of quietly absorbing it into the next feature.
+
 ---
 
 <!-- Add new entries above this line, most recent first. -->

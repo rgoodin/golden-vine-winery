@@ -258,24 +258,60 @@ one; a restart resumes correctly from the saved checkpoint with no
 reprocessing. All three independently verified against ServiceNow, not
 just local state (`docs/devex/observations.md` OB-0025).
 
-**Still not wired in — deliberately, this round:**
+**Stale-operation recovery is now wired into `src/` too:**
+`idempotencyStore.ts` gained `reclaimOperation()` - the production form
+of the experimental `reclaim()` (OB-0020/OB-0021), same atomic
+`UPDATE ... WHERE status = 'in_flight' AND acquired_at < cutoff` shape,
+`staleAfterMs` supplied by the caller rather than defaulted anywhere.
+Target reconciliation was deliberately kept out of the generic store:
+`src/servicenow/incidentReconciliation.ts` (queries the standard
+`correlation_id` field, not the experimental
+`u_gv_business_operation_id` field) and
+`src/recoverStaleDistributorOnboardingOperation.ts` (reclaim → query
+ServiceNow → complete-or-create, matching ADR 0005's recovery diagram)
+are new, separate modules that the generic store never imports. Both
+previously-reproduced crash boundaries (OB-0018) and concurrent reclaim
+(OB-0021) were re-verified through these real functions against live
+ServiceNow (`npm run test-production-recovery`, `docs/devex/observations.md`
+OB-0026), and normal processing/checkpoint behavior confirmed
+unregressed by running the live subscriber through another publish and
+restart.
 
-- Stale-operation recovery (reclaim + target reconciliation) - both
-  validated experimentally already (OB-0020, OB-0021), but not carried
-  into `idempotencyStore.ts`. Consequence: a crash between acquiring
-  ownership and completing it currently leaves that one business
-  operation stuck with no automatic recovery
-  (`docs/devex/friction-log.md` FL-0023, a known and accepted gap, not
-  an oversight).
+Two things this round surfaced that weren't visible until recovery was
+actually implemented:
+
+- **Recovery needs the original event, not just the ID.** The durable
+  store deliberately stores no event payload, so
+  `recoverStaleDistributorOnboardingOperation()` takes the full event
+  and depends on some external source (Salesforce's own replay
+  capability, `pubsubClient.ts`'s `replayRange()`, OB-0011) to supply it
+  - it is not self-contained the way `processDistributorOnboardingEvent()`
+  is (`docs/devex/friction-log.md` FL-0024).
+- **Nothing calls recovery automatically yet.** A stuck operation is
+  invisible to normal Salesforce redelivery - it lands in the ordinary
+  "already owned, do nothing" branch, not the recovery path - so it
+  stays stuck until something external deliberately recovers it. The
+  audit tool can already classify it as `GAP`; nothing yet connects that
+  classification to an actual recovery call
+  (`docs/devex/friction-log.md` FL-0025).
+
+**Still not wired in — deliberately:**
+
+- Anything that triggers recovery automatically (a scheduled worker, or
+  wiring the audit tool's `GAP` output to a recovery call) - this is the
+  smallest next Tier 1 Enablement step, not yet done.
 - The audit tool (`detect-unprocessed-events.ts`) on any automatic
   schedule - still on-demand only.
 - Genuine multi-instance concurrency testing at the real entry point -
   `src/salesforce/checkpoint.ts` assumes a single running instance, so
-  this round tested concurrent processing via two direct calls to the
-  real function rather than two live subscriber processes
+  concurrency has been tested via direct calls to the real functions
+  rather than two live subscriber processes
   (`docs/devex/friction-log.md` FL-0022).
 - A general retry / dead-letter framework, heartbeat/fencing, and Tier 2
-  for any target.
+  for any target. Recovery's staleness policy also still cannot
+  distinguish a genuinely dead owner from a slow-but-alive one
+  (OB-0022) - that race remains open by design, not solved by this
+  round.
 - Giving the audit tool its own incremental "last audited position" so
   repeat runs don't always re-sweep from `EARLIEST` (LL-0011) - proposed,
   not built.

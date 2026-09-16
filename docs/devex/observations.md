@@ -1282,4 +1282,77 @@ attempted this round, and what would need to change first).
 
 ---
 
+### OB-0026: Stale-operation recovery wired into the real service — both crash boundaries and concurrent reclaim confirmed against production abstractions and live ServiceNow
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0005, Tier 1)
+**Category:** implementation / verification
+
+Second Enablement-phase implementation round, extending OB-0025:
+`src/reliability/idempotencyStore.ts` gained `reclaimOperation()` (the
+production form of `scripts/lib/idempotencyStore.ts`'s `reclaim()`,
+OB-0020/OB-0021 - same "constraint decides, not a read" `UPDATE ...
+WHERE` shape, `staleAfterMs` still caller-supplied, no default baked
+in). Target reconciliation was deliberately kept out of that module:
+`src/servicenow/incidentReconciliation.ts` (queries ServiceNow's
+standard `correlation_id` field - the one `incidentAdapter.ts` already
+writes, not the experimental `u_gv_business_operation_id` field the
+prototype used) and `src/recoverStaleDistributorOnboardingOperation.ts`
+(the reclaim → query → complete-or-create orchestration from ADR 0005's
+recovery diagram) are new, separate modules. This is again a check of
+whether OB-0020/OB-0021's experimentally-proven recovery behavior still
+holds once moved into the real service and driven against live
+ServiceNow, not a new architectural finding.
+
+**All three properties confirmed via `scripts/test-production-recovery.ts`
+(`npm run test-production-recovery`), driven through the real production
+functions, independently verified against ServiceNow after each case:**
+
+- **Case 1 (crash before the ServiceNow call):** `acquireOperation()`
+  called directly with no following `createOnboardingIncident()` call,
+  simulating exactly OB-0018's crash boundary. After the operation
+  became genuinely stale, `recoverStaleDistributorOnboardingOperation()`
+  reclaimed it, found nothing via reconciliation, and created Incident
+  INC0010033. Independently verified: exactly one Incident exists for
+  that business operation. **PASS.**
+- **Case 2 (crash after the ServiceNow call, before local completion):**
+  `acquireOperation()` followed by a real `createOnboardingIncident()`
+  call (INC0010034 actually created), with `completeOperation()`
+  deliberately skipped, simulating OB-0018's other crash boundary.
+  Recovery reclaimed it, reconciliation found the existing Incident, and
+  recorded completion against it rather than creating a second one.
+  Independently verified: still exactly one Incident, matching the
+  original `sys_id`. **PASS.**
+- **Case 3 (concurrent reclaim of the same stale operation):** two
+  concurrent calls to `recoverStaleDistributorOnboardingOperation()` for
+  the same business operation, fired via `Promise.all` through the real,
+  shared, module-singleton store (not the experiment's per-call-opened
+  handle). Exactly one call reclaimed (`reclaimed: true`); the other
+  correctly saw `reclaimed: false` and never contacted ServiceNow at
+  all. Exactly one Incident (INC0010035) resulted, independently
+  verified. **PASS** - OB-0021's concurrent-reclaim property survives
+  the production extraction, including the connection-reuse difference
+  from the experimental version.
+
+**Replay/checkpoint behavior confirmed unregressed again:** ran the real
+subscriber, published a fresh event, confirmed normal processing and a
+saved checkpoint; restarted it and confirmed it resumed
+`ReplayPreset.CUSTOM` from exactly that checkpoint with no reprocessing.
+Recovery is invoked as a separate, explicit call in this round (see
+FL-0025) and touches neither `pubsubClient.ts` nor `checkpoint.ts`, so
+this was expected, not just hoped for.
+
+**What this round deliberately did not build, per ADR 0005's and this
+round's explicit scope:** anything that invokes recovery automatically
+(a scheduled worker, a trigger tied to the audit tool's `GAP`
+classifications), heartbeat/fencing, Tier 2, and - explicitly - any
+attempt at OB-0022's slow-owner race. `reclaimOperation()`'s "stale"
+still means "eligible for recovery under the caller's policy," not
+"proven dead"; a genuinely slow-but-alive original owner remains just
+as reclaimable, and just as capable of producing a duplicate on its own
+delayed completion, as before. See FL-0024 and FL-0025 for new
+implementation friction this round exposed.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

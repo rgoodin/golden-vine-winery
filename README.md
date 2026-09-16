@@ -105,13 +105,15 @@ go silent. A stronger, exactly-once guarantee is available only for a
 target *proven* to enforce uniqueness itself, evaluated the same
 rigorous way ServiceNow was: ServiceNow has not earned it yet.
 
-**Enablement has begun.** The baseline guarantee's normal processing
-path and concurrent-initial-processing protection are now wired into
+**Enablement is underway.** The baseline guarantee's normal processing
+path, concurrent-initial-processing protection, and now stale-operation
+recovery (reclaim plus ServiceNow reconciliation) are all wired into
 the real service, replacing the old direct event-to-ServiceNow path,
 and verified against real Salesforce and ServiceNow rather than only
-against the experimental prototype. Stale-operation recovery (reclaim
-and target reconciliation) is not wired in yet - a deliberate,
-documented gap, not an oversight - and is the next smallest step.
+against the experimental prototypes. What's still missing is anything
+that triggers recovery automatically - today it has to be invoked
+deliberately, with the original event in hand - a deliberate, documented
+gap, not an oversight, and the next smallest step.
 
 See [`CLAUDE.md`](./CLAUDE.md) ("Current Repository State") for the
 up-to-date summary,

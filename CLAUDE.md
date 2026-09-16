@@ -94,24 +94,38 @@ event → ServiceNow path. Verified against real Salesforce and
 ServiceNow: normal processing, concurrent-delivery rejection (via the
 real function, `npm run test-production-concurrent-idempotency`), and
 checkpoint/replay resume across a restart — all independently confirmed
-against ServiceNow, not just local state (OB-0025). Reclaim, target
-reconciliation, and scheduled audit are **not** wired in yet — a crash
-between acquiring ownership and completing it currently leaves that one
-business operation stuck with no recovery, a known, deliberate gap
-(FL-0023) — and `reclaim()` was not carried over into the production
-store for that reason. The smallest next Tier 1 Enablement step is
-wiring a stale-operation recovery mechanism (reclaim + target
-reconciliation, both already validated experimentally — OB-0020,
-OB-0021) into the real service; not yet done.
+against ServiceNow, not just local state (OB-0025).
+
+**Stale-operation recovery is now also wired into the real service.**
+`idempotencyStore.ts` gained `reclaimOperation()` (same atomic
+`UPDATE ... WHERE` shape as the experimental `reclaim()`, OB-0020/
+OB-0021, `staleAfterMs` still caller-supplied); ServiceNow-specific
+reconciliation was deliberately kept out of it —
+`src/servicenow/incidentReconciliation.ts` (queries the standard
+`correlation_id` field) and `src/recoverStaleDistributorOnboardingOperation.ts`
+(reclaim → query ServiceNow → complete-or-create) are new, separate
+modules. Both previously-reproduced crash boundaries and concurrent
+reclaim were verified through these production functions against real
+ServiceNow (`npm run test-production-recovery`, OB-0026), and normal
+processing/checkpoint behavior confirmed unregressed. Two things this
+round surfaced, not previously visible: recovery needs the original
+event payload, which the durable store deliberately never stores
+(FL-0024); and normal Salesforce redelivery does **not** trigger
+recovery on its own — a stuck operation stays stuck until something
+external deliberately calls the recovery function for it (FL-0025).
+Nothing yet does that automatically. The smallest next Tier 1
+Enablement step is connecting the two: pairing the audit tool's `GAP`
+classifications with an actual recovery invocation, which requires
+replaying the corresponding Salesforce event (`pubsubClient.ts`'s
+`replayRange()`, OB-0011) to supply what recovery needs; not yet done.
 
 Also proposed but deliberately not built: giving the audit tool its own
 incremental "last audited position" so repeat runs don't always re-sweep
-from `EARLIEST` (LL-0011). Not yet built: stale-operation recovery in
-production, any Tier 2 investigation, an automatic (rather than
-on-demand) detection trigger, and tests. See
+from `EARLIEST` (LL-0011). Not yet built: an automatic recovery trigger,
+any Tier 2 investigation, and tests. See
 `services/integration-service/README.md` for current status and
-`docs/devex/dojo-perspectives.md` for what this Enablement round looked
-like from each DevEx Dojo role.
+`docs/devex/dojo-perspectives.md` for what these Enablement rounds
+looked like from each DevEx Dojo role.
 
 A Salesforce Developer Edition org (External Client App, JWT Bearer Flow)
 and a ServiceNow Developer Instance (Client Credentials grant, dedicated
@@ -126,6 +140,7 @@ Commands (from `services/integration-service/`):
     npm run build                                 # compile to dist/
     npm start                                      # run compiled output
     npm run test-production-concurrent-idempotency # verify the durable-ownership gate via the real processing function
+    npm run test-production-recovery              # verify stale-operation recovery via the real recovery function
 
 There is no lint or test tooling yet — do not invent commands for either.
 No other services exist yet. When more are added, or lint/test tooling is

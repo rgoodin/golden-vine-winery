@@ -32,12 +32,17 @@ const { DatabaseSync } = require('node:sqlite') as { DatabaseSync: new (path: st
  * - A single module-level connection, opened once and reused, rather
  *   than opened per call - appropriate for a long-running service
  *   process, not a short-lived script.
- * - Only `acquire` and `complete` are exposed. The experimental
- *   `reclaim()` (staleness-based recovery, OB-0020/OB-0021) is
- *   deliberately NOT carried over here - ADR 0005's Tier 1 baseline, as
- *   scoped for this Enablement round, covers normal processing and
- *   concurrent initial-processing protection only. Recovering a stale
- *   operation is explicitly the next Enablement step, not this one.
+ * - Only ownership/state primitives live here: `acquireOperation`,
+ *   `reclaimOperation`, `completeOperation`, `getOperation`. Target
+ *   reconciliation (deciding what "stale" should actually resolve to
+ *   against a specific target) is deliberately NOT here - see
+ *   `src/servicenow/incidentReconciliation.ts` and
+ *   `src/recoverStaleDistributorOnboardingOperation.ts`. This module
+ *   knows nothing about ServiceNow, Incidents, or any other target; it
+ *   only knows which business operations are in flight, stale, or
+ *   completed. Keeping that boundary is what lets a second target reuse
+ *   this module unchanged (see `docs/devex/dojo-perspectives.md`
+ *   DP-0003).
  */
 
 export type OperationStatus = 'in_flight' | 'completed';
@@ -115,6 +120,46 @@ export function completeOperation(businessOperationId: string, incidentSysId: st
       'UPDATE business_operations SET status = ?, incident_sys_id = ?, incident_number = ?, completed_at = ? WHERE business_operation_id = ?'
     )
     .run('completed', incidentSysId, incidentNumber, new Date().toISOString(), businessOperationId);
+}
+
+/**
+ * Atomic, conditional reclaim of a stale `in_flight` operation - the
+ * production form of the mechanism validated experimentally in
+ * `scripts/lib/idempotencyStore.ts` (OB-0020, OB-0021). A caller
+ * reclaims only if the row is still `in_flight` AND its `acquired_at` is
+ * older than `staleAfterMs`; both conditions are evaluated inside the
+ * single `UPDATE`'s `WHERE` clause, so the database engine - not a prior
+ * read - decides whether this call's reclaim took effect (`changes >
+ * 0`). Same "constraint decides, not a read" principle as
+ * `acquireOperation`, applied to recovery instead of first creation.
+ *
+ * `staleAfterMs` is supplied by the caller, not defaulted here - this
+ * module has no opinion on how long is "genuinely abandoned" for any
+ * particular target or business operation; that judgment belongs with
+ * whatever invokes recovery.
+ *
+ * A row with no matching `in_flight`/stale state - because it was never
+ * acquired, is still fresh, or is already `completed` - reclaims
+ * nothing (`false`, zero rows changed). Reclaim can therefore never
+ * create a new operation or touch a healthy one; it only ever acts on a
+ * row that already exists and already looks abandoned under the
+ * caller's chosen policy.
+ *
+ * "Stale" here means "eligible for recovery under this policy," not
+ * "proven dead." A slow-but-still-running original owner can be
+ * reclaimed by this same mechanism while its own ServiceNow call is
+ * genuinely still in flight - confirmed unsafe with real independent
+ * processes in OB-0022, and NOT solved by this function or anything
+ * that calls it. That gap is preserved, not reopened, by this round.
+ */
+export function reclaimOperation(businessOperationId: string, staleAfterMs: number): boolean {
+  const cutoff = new Date(Date.now() - staleAfterMs).toISOString();
+  const result = getStore()
+    .prepare(
+      'UPDATE business_operations SET acquired_at = ? WHERE business_operation_id = ? AND status = ? AND acquired_at < ?'
+    )
+    .run(new Date().toISOString(), businessOperationId, 'in_flight', cutoff);
+  return Number(result.changes) > 0;
 }
 
 /** Read-only lookup, for logging/observability when `acquireOperation` returns `false`. */
