@@ -1,15 +1,18 @@
 # Architecture Spike: Guaranteeing Exactly-One Incident per Business Event
 
 **Status:** SPIKE — investigation only. No decision made, no ADR written.
-**Date:** 2026-09-15 (updated three times same day: a focused ServiceNow
-target-side idempotency follow-up — §3a/§3b — a direct continuation
-resolving two real causes behind §3a's open question, without resolving
-the question itself — see §3a's "Follow-up" note — and then an
-investigation-only durable-state prototype tested under matched
-concurrency — see §4's "C-prototype" subsection)
+**Date:** 2026-09-15, updated four times: three focused ServiceNow
+target-side idempotency follow-ups the same day (§3a/§3b, then a direct
+continuation resolving two real causes behind §3a's open question — see
+§3a's first "Follow-up" note — then an investigation-only durable-state
+prototype tested under matched concurrency, §4's "C-prototype"
+subsection), and a fourth, bounded follow-up the next day (2026-09-16)
+that identified the raw `sys_index` path's root cause with certainty
+and narrowed the supported wizard's still-unexplained failure — see
+§3a's second "Follow-up" note.
 **Related:** `docs/devex/friction-log.md` FL-0011–FL-0019,
-`docs/devex/observations.md` OB-0007–OB-0018,
-`docs/devex/lessons-learned.md` LL-0005–LL-0013,
+`docs/devex/observations.md` OB-0007–OB-0019,
+`docs/devex/lessons-learned.md` LL-0005–LL-0014,
 `docs/decisions/0001`–`0004`
 
 ## Purpose
@@ -222,6 +225,57 @@ active, §3b's concurrency experiment was **not** rerun under an
 "enforced" premise - see §6 and §7 for how this changes the recommended
 next step.
 
+**Second follow-up, next day (FL-0018, OB-0019): the raw path's root
+cause is now certain; the wizard's failure is narrowed, not yet
+explained.** A bounded, final investigation of this candidate, with the
+explicit constraint of not building any workaround merely to force a
+result.
+
+- **Read the `sys_index` table's own `create` Access Control directly**
+  (as admin, with `security_admin` freshly re-elevated for this fresh
+  session and reverified active via the account's own avatar label -
+  elevation does not persist across browser sessions). `admin_overrides`
+  is `false`, and the one required role is `nobody` - ServiceNow's
+  standard convention for a role no user can hold. This is a
+  **deliberate, universal platform restriction**, authored by `system`
+  in 2015, not a permissions gap - it fully explains every "Invalid
+  insert" seen against the raw form, in this round and the original one.
+  Not fixable by any interactive user's privilege, ever.
+- **Retested the wizard three further ways**, isolating every remaining
+  plausible cause: a *non-unique* index on the same field (ruling out
+  the uniqueness flag itself as the trigger - it wasn't, the plain index
+  didn't persist either); a unique index on the same field with data
+  reconfirmed clean; and a unique index on a **brand-new, empty,
+  single-column custom table** created specifically for this test
+  (ruling out `incident`'s size, its `task` inheritance, and its
+  specific field type as the cause). All three: `200`/`200`, no error,
+  no native dialog triggered (confirmed via stubs, consistent with this
+  project's standing rule against automating past a real confirm/alert),
+  zero persisted record.
+- **Net effect:** privilege, dirty data, table complexity, and field
+  type are now each individually *ruled out* by direct test, not merely
+  unconsidered - across five total attempts spanning two sessions. The
+  raw path's block is fully explained (a wall, not a gap); the wizard's
+  failure - on a supported path apparently built to route around that
+  same wall - remains genuinely unexplained, most plausibly an
+  edition/plugin-level restriction specific to this developer instance,
+  not observable from a browser session.
+- Import Set + Transform Map coalesce (the other candidate mechanism
+  named in this round's instructions) was **not** hands-on tested, to
+  keep this round bounded - reasoned about instead: ServiceNow's
+  documented coalesce behavior is implemented as a query-then-write
+  pattern against the target table, not a documented database-level
+  atomic upsert, so its concurrency guarantee (if any) would likely
+  match Candidate B's rather than provide something new - unless backed
+  by a real unique index, which loops back to the same unresolved
+  mechanism. Flagged explicitly as unverified reasoning, not a result.
+
+No enforceable constraint was configured, so the concurrency experiment
+was **not** rerun a third time under a claimed "enforced" premise, and
+no workaround (business rule, application-level lock, or
+lookup-before-create presented as equivalent) was substituted. Full
+account: FL-0018's second follow-up, OB-0019.
+
 ### 3b. Concurrency experiment: what happens today, with no enforced constraint
 
 Per this round's explicit instruction, this was **not** tested as
@@ -288,17 +342,18 @@ everything already recorded.)
 
 **What was investigated:** whether ServiceNow can enforce or naturally
 support idempotent creation keyed on an external/correlation identifier
-- including, this round, a direct concurrency experiment against the
-unconstrained field and three attempts (via real admin access) to
-actually create a platform-enforced unique index. See §3a/§3b for the
-concrete results.
+- including a direct concurrency experiment against the unconstrained
+field, and five separate attempts (via real, verified-elevated admin
+access) across two sessions to actually create a platform-enforced
+unique index, plus reading the platform's own Access Control governing
+manual index creation directly. See §3a/§3b for the concrete results.
 
 **Failure-mode analysis:**
 
 | Failure mode | Result |
 |---|---|
 | Crash before target side effect | Safe - nothing happened yet |
-| Crash after target side effect, before checkpoint | **Unproven, not solved.** Would require a real uniqueness mechanism (e.g. a `sys_index` unique constraint, or Import Set coalesce) - attempts to create one this round did not succeed (FL-0018/§3a). Confirmed *without* one, two concurrent creates both succeed (§3b) |
+| Crash after target side effect, before checkpoint | **Still unproven, not solved - now for a more specific reason.** Would require a real uniqueness mechanism (e.g. a `sys_index` unique constraint). The manual-creation path is now confirmed permanently blocked by a platform ACL (role `nobody`, `admin_overrides=false` - OB-0019); the supported wizard path has failed on every one of five separate attempts, with privilege, dirty data, table complexity, and field type each individually ruled out as the cause. Confirmed *without* an enforced mechanism, two concurrent creates both succeed (§3b) |
 | Replay/redelivery | Same as above - depends entirely on the unproven enforcement mechanism |
 | Duplicate source publication (same `correlationId`) | **Directly tested and failed to hold**, for the current (unconstrained) configuration: two concurrent requests for the same business-operation ID both created an Incident (OB-0014) |
 | Temporary ServiceNow failure | Unaddressed - orthogonal |
@@ -308,9 +363,11 @@ If a real enforcement mechanism could be made to work, this candidate
 would still let the integration keep today's *simpler* checkpoint
 ordering (checkpoint after ServiceNow) safely - the duplicate-prevention
 work would move entirely to ServiceNow, and FL-0015's failure mode would
-stop mattering. That conclusion now carries a bigger "if" than the
-spike's first pass could know: the enforcement mechanism itself is the
-open question, not a detail to fill in later.
+stop mattering. That conclusion still carries the same bigger "if" the
+prior round left it with: the enforcement mechanism itself is the open
+question, not a detail to fill in later - and this round has ruled out
+the plausible explanations for the wizard's failure without resolving
+what remains.
 
 ### B. Lookup-before-create / correlation-based processing
 
@@ -474,11 +531,16 @@ identity is a publisher-contract problem, not a field-availability one.
   but repeated direct attempts to achieve it (with genuine, verified-
   elevated admin access, not blocked by ADR 0004's least-privilege
   stance, and with the one real data problem the platform itself flagged
-  fixed) did not succeed (FL-0018, OB-0016), and the concurrency
-  experiment confirms the unconstrained failure mode is real and current
-  (OB-0014). The most robust untested route (Import Set + coalesce)
-  remains an architecture change, not a config tweak, and was not
-  attempted this round.
+  fixed) did not succeed across five separate attempts spanning two
+  sessions (FL-0018, OB-0016, OB-0019), and the concurrency experiment
+  confirms the unconstrained failure mode is real and current (OB-0014).
+  One path is now confirmed permanently closed by platform design (a
+  `create` ACL on `sys_index` requiring an unassignable role); the
+  other (the supported wizard) has failed with privilege, data, table
+  complexity, and field type all ruled out as the cause, but without a
+  definitive "not possible" answer either. Import Set + coalesce remains
+  an architecture change, not a config tweak, and was reasoned about but
+  not hands-on tested.
 - **B (lookup-before-create):** Smallest, fastest, reuses proven code -
   but a race-prone mitigation, not a guarantee, unless paired with A.
 - **C (durable state):** Most complete and most platform-agnostic on
@@ -509,28 +571,39 @@ FL-0017, independent of whichever of A/C is eventually chosen here.
   **resolved this round:** yes, observed reliably in §3b's concurrency
   experiment (both newly-created records were immediately visible to an
   independent follow-up query).
-- **Still the most load-bearing open question, now narrowed rather than
-  resolved:** *why* does ServiceNow's admin-UI index-creation wizard
-  accept a fully-configured unique-index request and return
-  success-shaped responses without ever persisting a record (FL-0018)?
-  A same-day follow-up (FL-0018, OB-0016) directly tested and eliminated
-  the two most plausible explanations - `security_admin` not being
-  elevated for the session, and duplicate data in the target column -
-  and the gap remained after fixing both, confirmed via a real
-  30-second wait plus three independent tables
-  (`sys_index`/`staged_alter_history`/`sys_email`), none of which show
-  any trace of the operation completing. What remains genuinely unknown
-  is whether this is a licensing/edition gate, a code path this
-  particular wizard doesn't actually reach, or something this browser
-  session simply cannot observe (e.g. a server-side log only visible to
-  ServiceNow's own support tooling). This determines whether Candidate A
-  is actually infeasible here or just not yet achieved - and is now past
-  what further UI-only investigation can resolve (see §7).
+- ~~Whether the raw `sys_index` manual-insert path is blocked by a
+  fixable permissions gap or something more fundamental~~ - **resolved:**
+  its `create` Access Control requires role `nobody` with
+  `admin_overrides=false` (OB-0019) - a deliberate, universal platform
+  restriction, confirmed by reading the ACL directly, not fixable by any
+  interactive user's privilege.
+- **Still the most load-bearing open question, narrowed twice now, not
+  yet resolved:** *why* does ServiceNow's supported "Database Indexes"
+  wizard accept a fully-configured index request and return
+  success-shaped responses without ever persisting a record, on a path
+  that (unlike raw manual insert) isn't blocked by the ACL above? Two
+  follow-ups (FL-0018/OB-0016, then FL-0018's second follow-up/OB-0019)
+  have now directly tested and eliminated four plausible explanations in
+  turn - `security_admin` not being elevated, duplicate data in the
+  target column, the uniqueness flag itself, and table
+  complexity/field type (tested on a brand-new empty custom table) -
+  and the gap remained after eliminating all four. What remains
+  genuinely unknown is whether this is a licensing/edition gate specific
+  to this developer instance, a code path this particular wizard doesn't
+  actually reach, or something this browser session simply cannot
+  observe (e.g. a server-side log only visible to ServiceNow's own
+  support tooling). This determines whether Candidate A is actually
+  infeasible here or just not yet achieved - and is now past what
+  further UI-only investigation can resolve (see §7).
 - Whether Import Set + Transform Map coalesce is configurable in this
-  instance - **still not attempted.** This round investigated `sys_index`
-  instead (the mechanism actually surfaced by inspecting the schema
-  directly), not Import Sets/Transform Maps; that documented pattern
-  remains a completely separate, unverified path to the same goal.
+  instance - **still not hands-on attempted**, by deliberate choice to
+  keep each investigation round bounded. Reasoned about instead
+  (FL-0018's second follow-up): ServiceNow's documented coalesce
+  behavior is a query-then-write pattern, not a documented database-level
+  atomic upsert, so it likely doesn't provide a different guarantee in
+  kind from Candidate B unless backed by a real unique index - which
+  loops back to this same unresolved question. That reasoning is
+  unverified, not a tested result.
 - What upstream (Salesforce-side) publishing contract will actually
   govern `Correlation_Id__c` stability across retries in production -
   this project has only ever been its own publisher via test scripts; the
@@ -559,32 +632,39 @@ FL-0017, independent of whichever of A/C is eventually chosen here.
 ## 7. Recommendation: smallest next experiment to discriminate between the strongest candidates
 
 **Still not selecting an architecture, and explicitly not writing an ADR
-this round - but the reason has changed.** Earlier rounds stopped short
-of an ADR because the evidence didn't yet discriminate between A and C.
-That is no longer quite true: C now has a real, working prototype behind
-its duplicate-prevention claim (OB-0017), which is more than A has ever
-had. What stops an ADR now is different - **C's own follow-up experiment
-(OB-0018) surfaced a serious, undesigned failure mode in C itself.**
-Choosing C today would mean choosing an architecture whose crash-recovery
-half is a known, confirmed gap, not an unknown one - a worse position
-than "evidence doesn't discriminate," not a better one. An ADR needs
-either A's mystery resolved or C's reclaim problem solved (or at least
-designed and reasoned about), not just "C's happy path works."
+this round - the reason from the prior round still holds, now on firmer
+ground.** C has a real, working prototype behind its duplicate-prevention
+claim (OB-0017) - the only candidate with positive experimental evidence
+of enforcing the invariant at all (LL-0014). But **C's own follow-up
+experiment (OB-0018) surfaced a serious, undesigned failure mode in C
+itself**, and this round did not touch it (explicitly out of scope, per
+instruction - Candidate C was not modified and its reclaim/staleness
+mechanism was not designed). Choosing C today would still mean choosing
+an architecture whose crash-recovery half is a known, confirmed gap. In
+parallel, this round narrowed Candidate A considerably without resolving
+it: the raw manual-insert path is now conclusively explained (a platform
+ACL requiring an unassignable role - OB-0019, not a gap, a wall), while
+the supported wizard path has failed with privilege, dirty data,
+uniqueness-flag, table complexity, and field type each individually
+ruled out across five attempts - genuinely stronger negative evidence,
+still not a definitive "impossible." An ADR needs either that mystery
+resolved or C's reclaim problem designed and tested, not just "C's happy
+path works" or "A's obvious explanations are ruled out."
 
 **Recommended smallest next experiment - two independent paths, neither
-blocking the other:**
+blocking the other, matching LL-0014:**
 
-1. **Open a real ServiceNow support case for FL-0018's specific
-   symptom** (a `200`-status "Database Indexes" wizard submission, on an
-   elevated-privilege session, against a column with no duplicate
-   values, that never results in a persisted `sys_index` record, no
-   error surfaced, and no trace in `sys_index`, `staged_alter_history`,
-   or `sys_email`). Still the smallest possible action left for
-   Candidate A - it requires no further engineering, and it is the only
-   route left to a real answer to *why*, since this session has
-   exhausted what browser-only investigation can observe. Outside this
-   project's normal engineering loop, so explicitly not something to
-   block on.
+1. **Open a real ServiceNow support case for the wizard's specific,
+   now well-characterized symptom**: a `200`-status "Database Indexes"
+   wizard submission, on a verified-elevated `security_admin` session,
+   against a column with no duplicate values on a trivial brand-new
+   table, that never results in a persisted `sys_index` record, no error
+   surfaced, no trace in `sys_index`, `staged_alter_history`, or
+   `sys_email`. Still the smallest possible action left for Candidate A
+   - this project has now exhausted what browser-only investigation can
+   observe, and the symptom is precise enough to describe accurately.
+   Outside this project's normal engineering loop, so explicitly not
+   something to block on.
 2. **For Candidate C: design (not yet implement) a staleness/reclaim
    policy for the crash-gap failure mode (OB-0018), then test the
    *reclaim* mechanism itself under the same adversarial rigor already
@@ -592,12 +672,11 @@ blocking the other:**
    window can be chosen that is long enough to avoid falsely reclaiming
    a request that is still genuinely in flight (which would reintroduce
    OB-0014's duplicate) while short enough to bound how long a real
-   crash stays unrecoverable. This is smaller than a full production
-   implementation of Candidate C, and it is the one piece of C's design
-   that has gone from "not investigated" to "investigated and found
-   wanting" this round - making it the most load-bearing open question
-   for C, the same way FL-0018's mystery is the most load-bearing open
-   question for A.
+   crash stays unrecoverable. Still not started - two consecutive rounds
+   have now deliberately deferred it, most recently by this round's own
+   explicit instruction not to design Candidate C's reclaim mechanism
+   yet. It remains the single most load-bearing open question for C,
+   symmetric to the wizard mystery for A.
 
 Both candidates now have a clear, named, specific blocker rather than a
 vague "needs more investigation" - that is real progress toward an
@@ -636,3 +715,15 @@ referenced by `src/`, not wired into the subscriber or `incidentAdapter.ts`,
 and not the production implementation of Candidate C even if C is
 eventually chosen - only enough to test whether its core mechanism
 works and what its own failure modes are (OB-0017, OB-0018).
+
+A fourth round (2026-09-16, bounded to Candidate A only, per explicit
+instruction not to touch Candidate C) added one more live-instance
+artifact: a disposable custom table (`u_gv_index_test`, one `String`
+column, `u_test_key`) created specifically to test whether the
+"Database Indexes" wizard's failure was specific to the Incident table
+- not referenced by any runtime code, not deleted afterward (left in
+place as part of this investigation's evidence trail, matching this
+project's existing practice for `u_gv_business_operation_id`). No
+application-level locking, custom business rule, reconciliation worker,
+retry mechanism, or Candidate C reclaim/staleness design was built this
+round, per explicit instruction.

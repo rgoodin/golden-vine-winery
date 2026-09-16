@@ -703,6 +703,86 @@ experiment is.
 
 ---
 
+### LL-0014: On experimentally established facts alone, only one candidate has a confirmed working mechanism - and it has a confirmed hole
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Developer Experience
+**Evidence:** FL-0018 (both follow-ups), OB-0014, OB-0016, OB-0017,
+OB-0018, OB-0019
+
+**Lesson:** A bounded, final investigation of Candidate A resolved one
+open question with certainty - the raw `sys_index` creation path is
+blocked by a deliberate ServiceNow platform ACL (`create` requires role
+`nobody`, `admin_overrides=false`) - while leaving the supported
+wizard's own failure open after ruling out every plausible cause this
+project could test (privilege, dirty data, table complexity, field
+type, across five separate attempts total). Comparing strictly what has
+been *established by experiment*, not designed, assumed, or
+hoped for, for each candidate:
+
+**Candidate A (target-side idempotency):**
+- The null hypothesis (no enforced constraint) is proven: two
+  concurrent creates for one business-operation ID both succeed,
+  producing two Incidents (OB-0014).
+- Every attempt to establish an enforced constraint has failed, across
+  two sessions, five separate configurations, with `security_admin`
+  confirmed active for every attempt that mattered (OB-0016, OB-0019).
+- One path (raw manual insert) is now confirmed permanently blocked by
+  platform design, for any user, ever (OB-0019) - not a gap, a wall.
+- The other path (the supported wizard) has never once been observed
+  to succeed in this environment, but has also never returned a
+  definitive "this is not possible" - it fails silently every time,
+  which experimentally is a *different* fact than "confirmed
+  impossible."
+- **Net established fact: this environment has never been shown to
+  enforce the invariant, by any tested mechanism.**
+
+**Candidate C (integration-owned durable state):**
+- A minimal prototype of the actual atomicity mechanism (a real
+  `PRIMARY KEY` constraint) reliably enforces "one business-operation ID
+  -> at most one ServiceNow-bound attempt," 5/5 trials, with the losing
+  attempt confirmed to never reach ServiceNow at all (OB-0017).
+- The same prototype, under a simulated crash between acquiring
+  ownership and calling ServiceNow, reliably produces a **confirmed,
+  reproduced** permanent silent-loss failure mode with no designed
+  recovery (OB-0018).
+- **Net established fact: this candidate's core mechanism has been
+  shown to work, and it has been shown to have a specific, confirmed,
+  unaddressed hole.**
+
+**What this comparison does and does not support:** C is currently the
+only candidate with any confirmed positive evidence that its core
+mechanism enforces the invariant under concurrency. That is a real,
+experimentally-grounded asymmetry, not a preference. It is **not**
+enough to select C - its confirmed failure mode has no confirmed fix,
+which means choosing C today would mean choosing a known, reproduced
+gap over an unknown one. A dedicated durable-state mechanism with an
+undesigned recovery path is not yet demonstrably better than a
+target-side mechanism whose feasibility is merely unresolved - it is
+differently incomplete. Per this round's explicit scope, C's reclaim
+design was not attempted here and remains the specific next step for
+that candidate, not started as of this entry.
+
+**Recommended next discriminating experiments, one per candidate,
+neither started:**
+1. **For A:** escalate FL-0018/OB-0019's specific, well-characterized
+   symptom to ServiceNow's own support channel - the wizard's silent,
+   unexplained failure on a maximally clean test case is now specific
+   enough to describe precisely, and this project has exhausted what
+   browser-based investigation alone can observe.
+2. **For C:** design, then adversarially test, a staleness/reclaim
+   policy for OB-0018's crash-gap failure mode - specifically checking
+   whether a reclaim window can be chosen that avoids reintroducing
+   OB-0014's duplicate while still bounding how long a real crash stays
+   unrecoverable. Explicitly out of scope for this round's investigation
+   per instruction; named here as the next step, not undertaken.
+
+Neither experiment has run. Per instruction, no ADR is written here -
+the evidence sharpens both candidates' open questions without resolving
+either.
+
+---
+
 ## Recommended smallest Phase 3 Enablement experiment (not started)
 
 The prior recommendation (extend the detector to catch duplicates, not

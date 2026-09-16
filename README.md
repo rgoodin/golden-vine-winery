@@ -89,8 +89,11 @@ event," followed by matched concurrency experiments against both
 strongest candidates: against ServiceNow, with no enforced uniqueness
 constraint, two simultaneous requests both succeeded, creating two
 Incidents - and actually enforcing that constraint remains unresolved
-despite real admin access. Against a minimal prototype of an
-integration-owned durable-state store, the same test came back clean
+despite real admin access - a follow-up investigation later confirmed
+*why* the manual path is blocked (a deliberate platform permission
+restriction) while the officially supported path remains unexplained
+after ruling out every plausible cause. Against a minimal prototype of
+an integration-owned durable-state store, the same test came back clean
 5/5 times - but simulating a crash mid-operation revealed it trades that
 win for a different failure: permanent silent loss, with no recovery
 mechanism designed yet. Both candidates now have a specific, unresolved

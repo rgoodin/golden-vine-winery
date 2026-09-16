@@ -888,4 +888,61 @@ this round's instructions.
 
 ---
 
+### OB-0019: ServiceNow `sys_index` creation blocked by a genuine platform ACL for manual inserts; the supported wizard's separate failure confirmed on a third, maximally clean scenario
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Developer Experience
+**Category:** experiment / reliability / platform
+
+Bounded, final investigation of Candidate A per explicit instruction:
+determine whether this ServiceNow environment can enforce target-side
+uniqueness, without building any workaround to force success. Full
+account: FL-0018's second follow-up.
+
+**Root cause of the raw `sys_index.do` form's "Invalid insert" is now
+established with certainty, not inferred:** its `create` Access Control
+requires role `nobody` (a role no user can hold) with
+`admin_overrides=false` (so even `admin` gets no automatic bypass) -
+read directly from `sys_security_acl.do`, authored by `system` in 2015.
+This is a deliberate, universal ServiceNow platform restriction on
+directly inserting index metadata records, not a fixable permissions
+gap.
+
+**The supported "Database Indexes" wizard - built, presumably, to work
+around that exact restriction - was retested three ways, with
+`security_admin` freshly re-elevated and independently confirmed active
+for this session** (elevation does not persist across browser sessions;
+redone and reverified via the account's own avatar label): a plain
+non-unique index on the existing field (isolating whether uniqueness
+itself was the problem - it wasn't), a unique index on the same field
+with data confirmed clean, and a unique index on a brand-new, empty,
+single-column custom table created specifically for this test
+(isolating whether `incident`'s size or `task` inheritance was the
+cause). All three: `200` responses, no error, no native dialog
+triggered, and zero persisted `sys_index` record in each case.
+
+**This round's contribution is narrowing, not just repeating:**
+privilege, dirty data, table complexity, and field type are now each
+individually ruled out as the wizard's blocker, through direct
+elimination rather than assumption. What ACL-reading also clarified:
+the wizard's failure is a genuinely different, still-unexplained
+problem from the raw form's - the raw form is blocked by a documented,
+readable ACL; the wizard (which does not hit that same ACL - its
+requests return success-shaped responses, not "Invalid insert") fails
+for a reason this browser-based investigation cannot observe, most
+plausibly an edition/plugin-level restriction on this specific
+developer instance's schema-alteration capability.
+
+**No workaround was built to force a result**, per explicit instruction
+- no custom business rule, no application-level lock, no lookup-before-
+create substituted and presented as equivalent. Import Set + Transform
+Map coalesce (the other named alternative mechanism) was deliberately
+not hands-on tested this round to keep the investigation bounded;
+reasoned about instead (FL-0018) and flagged as unverified reasoning,
+not a tested result. Because no enforceable constraint could be
+configured, the business-operation concurrency experiment was not
+rerun a third time.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

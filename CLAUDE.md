@@ -84,7 +84,21 @@ both directly rather than continuing to reason from documentation:
    calling ServiceNow causes **permanent silent loss**, with no reclaim
    mechanism designed or built (OB-0018), the same lesson as LL-0009's
    checkpoint-ordering finding, now confirmed for this candidate too.
+4. **A fourth, bounded follow-up (next day) finally identified *why* the
+   raw index-creation path fails**: its own Access Control requires a
+   role no user can hold (`admin_overrides=false`, required role
+   `nobody`) — a deliberate ServiceNow platform restriction, confirmed by
+   reading the ACL directly, not a fixable gap. The *supported* wizard
+   path remains unexplained despite ruling out privilege, dirty data, the
+   uniqueness flag, and table complexity across five total attempts
+   (tested down to a brand-new, empty, single-column table) — genuinely
+   narrower evidence than before, still not a definitive answer
+   (FL-0018, OB-0019). Per instruction, Candidate C's reclaim design was
+   explicitly not touched this round.
 
+On experimentally established facts alone, only Candidate C has ever
+been shown to enforce the core invariant — but with a confirmed,
+unaddressed hole, so that's not enough to choose it either (LL-0014).
 Both candidates now have a specific, named, unresolved blocker rather
 than a vague "needs more investigation" — see
 `docs/architecture/0001-reliability-architecture-spike.md` §7 for both.

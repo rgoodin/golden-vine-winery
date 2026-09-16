@@ -944,6 +944,93 @@ that covers `node:sqlite` at that point, rather than now for a
 throwaway prototype. Not done here - out of scope for an investigation
 script per this round's instructions.
 
+#### Follow-up 2026-09-16: root cause of the raw-form path identified with certainty; the wizard's failure narrowed further, not yet explained
+
+Resumed this investigation with one bounded goal: stop guessing at causes
+and either configure a real target-side uniqueness constraint or obtain
+the strongest available evidence for why not - without building any
+workaround (no business rules, no Candidate C reclaim logic) merely to
+make this candidate succeed.
+
+**Definitively identified why the raw `sys_index.do` form has failed
+every time (the "Invalid insert" error from the original entry above).**
+Read the `sys_index` table's own `create` Access Control directly
+(`sys_security_acl.do?sys_id=4c61b5036f070200c8126852be3ee4c0`):
+`admin_overrides` is `false`, and its one required role
+(`sys_security_acl_role`) is **`nobody`** - ServiceNow's standard,
+documented convention for a role that cannot be assigned to any user.
+Combined with `admin_overrides=false` (meaning even the `admin` role's
+usual automatic bypass does not apply to this specific ACL), this is a
+**deliberate, universal, by-design platform restriction**, authored by
+`system` in 2015 (original OOB platform configuration, not something
+particular to this instance's customization) - not a permissions gap,
+not bad procedure, not something any amount of privilege elevation
+could ever satisfy. This fully explains every "Invalid insert" seen
+against the raw form, in this round and the original one.
+
+**The "Database Indexes" wizard - ServiceNow's own supported path,
+presumably built specifically to work around the restriction above -
+was retested three ways this round, all with `security_admin`
+re-verified active for this session (a fresh browser session; elevation
+does not persist across sessions and had to be redone, confirmed again
+via the avatar `aria-label`):**
+
+1. Against `incident.u_gv_business_operation_id` with **no** unique
+   flag set (a plain, non-unique index) - to isolate whether the
+   *uniqueness* flag specifically was the problem. It was not: the
+   plain index also returned `200`/no error and also did not persist.
+2. Against the same field with the unique flag set again, on a table
+   confirmed to now have zero duplicate values (this session's own
+   earlier duplicate, from OB-0014, was never re-introduced) - same
+   non-persisting outcome.
+3. **Against a brand-new, empty, single-field custom table**
+   (`u_gv_index_test`, one `String` column, zero rows, created live for
+   this test) with the unique flag set - to isolate whether `incident`'s
+   size, `task` inheritance, or field type was the cause. Same outcome:
+   `200`/`200`, no `confirm()`, no `alert()`, no error - and zero
+   persisted `sys_index` record for this table, confirmed via the same
+   verified-working filtered query used throughout this investigation.
+
+**Net result: privilege, dirty data, table complexity, and field type
+are now all ruled out as explanations for the wizard's failure**, not
+merely unconsidered. What remains genuinely unknown is whether this
+PDI's specific edition/plugin configuration restricts the underlying
+schema-alteration mechanism the wizard depends on (plausible - shared
+developer instances commonly restrict DDL for platform stability), or
+something else not observable from this browser session.
+
+**One methodological correction, unrelated to the finding above but
+worth recording:** while creating the test field for scenario 3, a
+`g_form.setValue()` call for a reference-typed field (`internal_type`
+on a Dictionary Entry) silently failed to resolve ("Match not found,
+reset to original"), producing a separate, misleading "Invalid insert"
+on that unrelated form. Real UI clicks/typeahead selection fixed it
+immediately. This did **not** affect any of this investigation's actual
+`sys_index` findings (the wizard flow never sets a reference field via
+JS - it only ever uses the already-proven `moveOption` slushbucket and
+a checkbox), but it's a reminder that `g_form.setValue()` on a
+reference field can silently no-op without an error at set time, only
+surfacing on submit - worth remembering before trusting any future
+"confirmed in-DOM" claim for a reference field set this way.
+
+**Not attempted this round, deliberately:** Import Set + Transform Map
+coalesce, the other named "supported mechanism" candidate from the
+original spike. Reasoned about instead of hands-on tested, to keep this
+round bounded: ServiceNow's documented Transform Map coalesce behavior
+is implemented via an internal query-then-write pattern against the
+target table, not a documented raw database-level atomic upsert
+primitive - meaning its concurrency guarantee, if any, would likely be
+equivalent in kind to lookup-before-create (Candidate B) unless the
+coalesce field is *also* backed by a genuine unique index - which loops
+back to the same unresolved mechanism this entire entry is about. This
+reasoning has not been empirically verified and is flagged as such, not
+presented as established fact.
+
+No ADR-adjacent workaround was built. No enforceable constraint was
+achieved, so the concurrency experiment was not rerun a third time under
+a claimed "enforced" premise - see OB-0019 and the architecture spike
+document for the full comparison against Candidate C.
+
 ---
 
 <!-- Add new entries above this line, most recent first. -->
