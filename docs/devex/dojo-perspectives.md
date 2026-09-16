@@ -194,6 +194,86 @@ previous phase's decision is itself what surfaces the next one's
 material, provided each round keeps writing that friction down instead
 of quietly absorbing it into the next feature.
 
+### DP-0009: A documented API semantic is a hypothesis until you've actually run it
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0005, Tier 1) - recovery-payload investigation
+**Perspective:** Developer
+
+The "obvious" minimal fix for FL-0024 is Approach C: store the stale
+operation's own replay ID, refetch it later. It reads as correct from
+Salesforce's own proto comment ("start after"), and it would have been
+easy to implement on that reading alone. Running it directly
+(`scripts/test-recovery-payload-source.ts` Part 2) showed the reference
+you'd naturally reach for - the event's own ID - specifically does not
+work; you need the position *before* it, which nothing today captures.
+The gap between "the docs say X" and "I ran it and confirmed X" is
+exactly where a plausible-looking implementation would have shipped
+silently broken. Worth treating as a default habit for this project
+whenever a fix's design leans on a platform's documented-but-unverified
+behavior, not just this one case.
+
+### DP-0010: The cheap-looking answer to "where does this data live" is the one most likely to hide an architectural cost
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0005, Tier 1) - recovery-payload investigation
+**Perspective:** Dojo Instructor
+
+Handed FL-0024 cold, a developer's fastest path is Approach B: just
+save the event payload when you acquire the operation, recovery reads
+it back, done. It looks like the obvious minimal fix - it is not. It
+reopens a boundary two earlier rounds deliberately drew (DP-0003,
+DP-0007: `idempotencyStore.ts` knows nothing about any target's or any
+event's shape) and introduces a real, new problem this project hasn't
+had to solve yet - versioning a durably-stored payload against a
+canonical event schema `CLAUDE.md` already says is expected to change.
+The teaching point isn't "Approach B is wrong" - OB-0027's comparison
+doesn't rule it out forever - it's that "where should this data live"
+questions deserve the same evidence-based comparison this round gave
+them, specifically because the easiest-to-reach-for answer is often the
+one with the most hidden, deferred cost.
+
+### DP-0011: The recovery-payload question resolved without touching the reliability abstraction at all - that's the boundary paying for itself
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0005, Tier 1) - recovery-payload investigation
+**Perspective:** Platform Engineer
+
+DP-0003 and DP-0007 both argued, from the inside, that keeping
+`idempotencyStore.ts` ignorant of any target's or event's shape would
+pay off later. This round is a real test from the outside: a genuinely
+hard, evidence-requiring question (where should Tier 1 recovery get its
+payload?) got investigated and resolved - recommend Approach A - without
+a single line of `idempotencyStore.ts` changing. That's not a
+coincidence of this particular question; it's what a correctly-drawn
+boundary is supposed to produce: the module that shouldn't need to
+change, for this kind of question, didn't have to. Worth watching
+whether that continues to hold once Phase 5's second target exists, but
+three rounds in, the boundary keeps being confirmed rather than
+strained.
+
+### DP-0012: Evidence and decision stayed separated again - the same discipline that produced ADR 0005, now at a smaller scale
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0005, Tier 1) - recovery-payload investigation
+**Perspective:** Dojo Director
+
+It would have been easy, two Enablement rounds into a working Tier 1
+implementation, to just pick Approach A and move on - the evidence
+supports it, and nothing forced a pause. Instead this round did what
+the reliability architecture spike did at a much larger scale: gathered
+direct experimental evidence, laid out a real comparison instead of a
+gut call, made a recommendation, and then explicitly separated "here is
+what the evidence supports" from "here is the decision, formally
+recorded" - proposing a small follow-up ADR rather than treating a
+recommendation as a decision. That's the same discipline that produced
+ADR 0005 in the first place, applied here to a question with a much
+smaller blast radius. The systemic value isn't this specific
+recommendation - it's evidence that the project's decision-making
+discipline doesn't only show up for the big architectural forks; it's
+holding at the scale of a single implementation detail, three rounds
+into Enablement, without anyone having to re-invoke it deliberately.
+
 ---
 
 <!-- Add new entries above this line, most recent first. -->

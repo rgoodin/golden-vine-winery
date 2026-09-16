@@ -113,16 +113,31 @@ event payload, which the durable store deliberately never stores
 (FL-0024); and normal Salesforce redelivery does **not** trigger
 recovery on its own — a stuck operation stays stuck until something
 external deliberately calls the recovery function for it (FL-0025).
-Nothing yet does that automatically. The smallest next Tier 1
-Enablement step is connecting the two: pairing the audit tool's `GAP`
-classifications with an actual recovery invocation, which requires
-replaying the corresponding Salesforce event (`pubsubClient.ts`'s
-`replayRange()`, OB-0011) to supply what recovery needs; not yet done.
+Nothing yet does that automatically.
+
+**Before wiring that automatic connection, a bounded investigation asked
+where recovery's payload should actually come from** (FL-0024's open
+question) — see OB-0027. Compared source-owned replay (Approach A),
+integration-owned payload storage (Approach B), and a minimal durable
+Salesforce-position reference (Approach C) with two direct experiments,
+not just reasoning: a bare business-operation ID *was* relocatable to
+its source event via a full `ReplayPreset.EARLIEST` sweep (no
+server-side query-by-field RPC exists — confirmed from the proto
+itself), but Salesforce's retention window for this topic is still
+unestablished (FL-0013); and an event's own replay ID does **not** let
+you refetch that event later (confirmed directly, not just from docs —
+`ReplayPreset.CUSTOM` resumes *after* the given position). **Recommends
+Approach A** (no code change, reuses already-validated tooling,
+preserves the target/source-agnostic boundary the reliability store has
+held since OB-0025) **and recommends a small follow-up ADR** before
+implementing the automatic connection, since this is a real
+architectural decision ADR 0005 didn't address. Neither the automatic
+trigger nor any of the three approaches has been implemented.
 
 Also proposed but deliberately not built: giving the audit tool its own
 incremental "last audited position" so repeat runs don't always re-sweep
-from `EARLIEST` (LL-0011). Not yet built: an automatic recovery trigger,
-any Tier 2 investigation, and tests. See
+from `EARLIEST` (LL-0011). Not yet built: the recovery-payload ADR, an
+automatic recovery trigger, any Tier 2 investigation, and tests. See
 `services/integration-service/README.md` for current status and
 `docs/devex/dojo-perspectives.md` for what these Enablement rounds
 looked like from each DevEx Dojo role.
@@ -141,6 +156,7 @@ Commands (from `services/integration-service/`):
     npm start                                      # run compiled output
     npm run test-production-concurrent-idempotency # verify the durable-ownership gate via the real processing function
     npm run test-production-recovery              # verify stale-operation recovery via the real recovery function
+    npm run test-recovery-payload-source          # investigate where recovery should source its payload from (OB-0027)
 
 There is no lint or test tooling yet — do not invent commands for either.
 No other services exist yet. When more are added, or lint/test tooling is

@@ -106,14 +106,20 @@ target *proven* to enforce uniqueness itself, evaluated the same
 rigorous way ServiceNow was: ServiceNow has not earned it yet.
 
 **Enablement is underway.** The baseline guarantee's normal processing
-path, concurrent-initial-processing protection, and now stale-operation
+path, concurrent-initial-processing protection, and stale-operation
 recovery (reclaim plus ServiceNow reconciliation) are all wired into
 the real service, replacing the old direct event-to-ServiceNow path,
 and verified against real Salesforce and ServiceNow rather than only
-against the experimental prototypes. What's still missing is anything
-that triggers recovery automatically - today it has to be invoked
-deliberately, with the original event in hand - a deliberate, documented
-gap, not an oversight, and the next smallest step.
+against the experimental prototypes. Before wiring recovery up
+automatically, a small bounded investigation asked where recovery's
+payload should come from in the first place - source-owned replay,
+integration-owned storage, or a minimal Salesforce-position reference -
+and answered it with two direct experiments rather than assumption,
+recommending the first option and a small follow-up ADR before it's
+implemented. What's still missing is anything that triggers recovery
+automatically - today it has to be invoked deliberately, with the
+original event in hand - a deliberate, documented gap, not an
+oversight, and the next smallest step.
 
 See [`CLAUDE.md`](./CLAUDE.md) ("Current Repository State") for the
 up-to-date summary,

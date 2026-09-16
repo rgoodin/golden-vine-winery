@@ -1355,4 +1355,97 @@ implementation friction this round exposed.
 
 ---
 
+### OB-0027: Where should Tier 1 recovery get its payload from? Source-owned wins on evidence; a minimal durable reference is more expensive than it looks
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Enablement (ADR 0005, Tier 1) - bounded investigation, not implementation
+**Category:** architecture investigation
+
+Bounded follow-up to FL-0024 (recovery needs the original event, but
+`idempotencyStore.ts` deliberately never stores one). Not a reliability
+redesign - ADR 0005 and the recovery mechanism from OB-0026 stand
+unchanged. Compared three approaches to where Tier 1 should source a
+recovering operation's business payload, using two direct experiments
+(`scripts/test-recovery-payload-source.ts`,
+`npm run test-recovery-payload-source`) rather than reasoning from the
+API docs alone.
+
+**Part 1 - Approach A (source-owned): can a bare business-operation ID
+be mapped back to its source event, using only what durable state
+already provides?** Published one real Salesforce event, reproduced the
+exact "acquired locally, crashed before ServiceNow" precondition from
+OB-0026's Case 1 (`acquireOperation()` only), then discarded all
+in-memory knowledge of the event except its correlationId - exactly
+what a real recovering process would have. A full `ReplayPreset.EARLIEST`
+sweep (the same mechanism `detect-unprocessed-events.ts` already uses),
+filtered client-side for that one correlationId, found it: 14 total
+retained events swept, 8598ms, to locate 1. Confirmed directly from
+`src/salesforce/proto/pubsub_api.proto`'s `FetchRequest` message (which
+has exactly `topic_name`/`replay_preset`/`replay_id`/`num_requested` -
+no filter field of any kind, across every RPC the API exposes) that no
+server-side query-by-field mechanism exists to do this more cheaply.
+This project has still never established Salesforce's actual retention
+window for this topic (FL-0013 stands - `GetTopic` exposes none) - so
+while relocation worked today, whether an older stale operation's event
+would still be retrievable by the time recovery actually runs remains
+genuinely unknown, not assumed either way.
+
+**Part 2 - Approach C (minimal durable reference): would persisting an
+event's own replay ID actually let you refetch that event later?**
+Published event A then event B in sequence, captured A's own replayId,
+then called `replayRange(topic, replayIdA)`. Result: 1 event returned -
+event B, not event A. **Confirmed directly, not just from the proto's
+documentation comment** ("specify the subscription point to start
+after"): replaying from an event's own replay ID returns whatever comes
+*after* it, never the event itself. A durable reference sufficient to
+refetch operation X's own event would have to be the position
+*preceding* X, not X's own ID - and nothing in this project captures a
+per-operation preceding position today (`checkpoint.ts` tracks exactly
+one global last-processed position for the whole stream, overwritten on
+every event, not a snapshot taken before each individual operation).
+
+**Comparison, all three approaches, against the requested dimensions:**
+
+| | A: source-owned (replay on demand) | B: integration-owned (persist payload) | C: minimal durable reference (persist a position) |
+|---|---|---|---|
+| Recover after restart | Yes - confirmed (Part 1) | Yes, trivially (no dependency) | Not with the naive reference (Part 2) - a correct one needs a preceding position, not built |
+| Depends on Salesforce replay/retention | Yes, fully - and that retention window is still unestablished (FL-0013) | No | Yes, fully - same retention risk as A |
+| Locate one specific operation | Yes, but full-topic-history sweep, O(all retained events), not O(1) | Yes, O(1) - same `PRIMARY KEY` lookup already used today | Yes, and cheaper than A *if* a correct preceding-position reference existed - it doesn't yet |
+| Payload/schema evolution | None - Salesforce remains sole owner of the event shape | Real - stored payload would need versioning as `DistributorOnboardingRequestedEvent` evolves; recovery could then be replaying an old shape against newer code | None - no payload stored |
+| Storage responsibility | Unchanged - stays entirely with Salesforce | New - `idempotencyStore` or a sibling abstraction would durably duplicate business data Salesforce already owns | Small new column, but capturing the *right* value requires new per-operation plumbing beyond "add a column" |
+| Coupling (generic reliability ↔ Salesforce) | Low for the store itself; the coupling already exists at the *recovery caller* today (FL-0024), unchanged by this | New - the store would need to know what "the payload" means, likely per business-event-type, eroding the target/source-agnostic boundary DP-0003/DP-0007 named as a real, already-observed benefit | New, differently - a replay-ID column bakes a Salesforce-specific addressing concept into a store that today knows about no particular source at all |
+| Developer-facing complexity | Sweep-and-filter logic already exists (the audit tool); cost grows with total topic history over the project's lifetime, unbounded today | Simple at recovery time; genuinely new decisions and code at acquire time (what to store, how to version it, where it lives) | Needs new capture-at-acquire-time plumbing (the preceding position, not the event's own) that doesn't exist anywhere in this codebase yet |
+
+**Recommendation: Approach A (source-owned).** It requires no code or
+schema change, reuses tooling already built and validated
+(`replayRange`, the same mechanism the audit tool depends on), and
+preserves the target/source-agnostic boundary this project has already
+found valuable twice (DP-0003, DP-0007). Its real cost - a full-topic
+sweep with an unknown retention ceiling - is a genuine, open
+operational risk, but one this project has not yet experienced as an
+actual problem (14 events, ~2 months in): per `CLAUDE.md`'s own
+principle, that is a reason to observe it, not to pre-emptively design
+around it with Approach B's payload duplication or Approach C's
+leakier, unbuilt reference mechanism. Approach C in particular looked
+cheap before this investigation and is now known, by direct experiment
+rather than assumption, to require real new plumbing to work correctly
+- it is not simply "store one more field."
+
+**This constitutes a material architectural decision ADR 0005 did not
+address** - ADR 0005 decided the reliability *guarantee* tier structure,
+not where a Tier 1 recovery caller should source its payload from. A
+small follow-up ADR is recommended before this is actually implemented
+(i.e., before an automatic GAP → recovery trigger is built), so the
+choice is recorded deliberately rather than settled implicitly by
+whichever code happens to get written first - not written this round.
+
+**What this round did not do, per its explicit scope:** connect the
+audit tool to recovery automatically, implement Approach B or C, or
+change any existing production code path (the only new code is the
+diagnostic script above; `idempotencyStore.ts`,
+`recoverStaleDistributorOnboardingOperation.ts`, and
+`incidentReconciliation.ts` are all unchanged from OB-0026).
+
+---
+
 <!-- Add new entries above this line, most recent first. -->
