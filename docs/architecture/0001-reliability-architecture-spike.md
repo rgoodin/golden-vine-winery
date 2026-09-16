@@ -1,7 +1,7 @@
 # Architecture Spike: Guaranteeing Exactly-One Incident per Business Event
 
 **Status:** SPIKE — investigation only. No decision made, no ADR written.
-**Date:** 2026-09-15, updated five times: three focused ServiceNow
+**Date:** 2026-09-15, updated six times: three focused ServiceNow
 target-side idempotency follow-ups the same day (§3a/§3b, then a direct
 continuation resolving two real causes behind §3a's open question — see
 §3a's first "Follow-up" note — then an investigation-only durable-state
@@ -9,12 +9,14 @@ prototype tested under matched concurrency, §4's "C-prototype"
 subsection); a fourth, bounded follow-up the next day (2026-09-16) that
 identified the raw `sys_index` path's root cause with certainty and
 narrowed the supported wizard's still-unexplained failure (§3a's second
-"Follow-up" note); and a fifth, same-day follow-up testing whether a
-stale durable record from that prototype can be safely reclaimed after
-a crash — see §4's "C-reclaim" subsection.
+"Follow-up" note); a fifth, same-day follow-up testing whether a stale
+durable record from that prototype can be safely reclaimed after a
+crash (§4's "C-reclaim" subsection); and a sixth, same-day follow-up
+testing whether target reconciliation actually closes the gap reclaim
+alone couldn't — see §4's "C-reconciliation" subsection.
 **Related:** `docs/devex/friction-log.md` FL-0011–FL-0020,
-`docs/devex/observations.md` OB-0007–OB-0020,
-`docs/devex/lessons-learned.md` LL-0005–LL-0015,
+`docs/devex/observations.md` OB-0007–OB-0021,
+`docs/devex/lessons-learned.md` LL-0005–LL-0016,
 `docs/decisions/0001`–`0004`
 
 ## Purpose
@@ -416,12 +418,12 @@ project has never needed and doesn't have.
 
 | Failure mode | Result |
 |---|---|
-| Crash before target side effect | **Confirmed recoverable, with a caveat now proven necessary, not hypothetical.** Staleness-based reclaim (see C-reclaim below) correctly completes a genuinely abandoned operation exactly once (OB-0020, Case 1) - but only when the crash truly happened before ServiceNow was ever called. Naive reclaim cannot itself tell this case apart from the next row |
-| Crash after target side effect, before checkpoint | **Confirmed unsafe to naively reclaim.** If ServiceNow was already called successfully before the crash, staleness-based reclaim cannot detect that and will call it again, reproducing OB-0014's duplicate (OB-0020, Case 2) - demonstrated, not assumed. The duplicate-prevention half at initial creation time remains solved (OB-0017); this row is specifically about *recovering* a crash, which is a different operation with different, confirmed-worse failure characteristics |
-| Replay/redelivery | Depends on which of the two rows above applies - and the durable record alone cannot say which (OB-0020) |
+| Crash before target side effect | **Confirmed solved with target reconciliation** (see C-reconciliation below) - reclaim + a ServiceNow lookup by business-operation ID correctly found nothing and created exactly once (OB-0021, Case 1). Solved for the two crash boundaries this project has reproduced; the slow-worker race (see C-reconciliation) remains untested |
+| Crash after target side effect, before checkpoint | **Confirmed solved with target reconciliation.** Reclaim + reconciliation found the real, already-existing Incident and recorded it as completion instead of creating a duplicate, verified by matching `sys_id` (OB-0021, Case 2) - the exact failure staleness-only reclaim produced (OB-0020) is now closed for this crash boundary |
+| Replay/redelivery | Solved by the same mechanism as the two rows above, for the crash boundaries actually reproduced |
 | Duplicate source publication | **Confirmed solved** (OB-0017) - keyed on business identity, not replay position, matching Candidate A's intended coverage, and unlike Candidate A this was verified working, not just designed |
 | Temporary ServiceNow failure | Could be extended to support real retry-with-backoff, which no other candidate addresses - but designing that further is out of this investigation's scope |
-| Process restart | Same dependency as "crash before target side effect" above - recoverable only when reclaim can tell the two crash boundaries apart, which it currently cannot |
+| Process restart | Same as "crash before/after target side effect" above - solved for sequential crash-then-restart, not yet tested under genuine concurrent recovery (the slow-worker race) |
 
 Most complete and most platform-agnostic candidate on paper, but the
 largest to build - real durable storage is net-new infrastructure for
@@ -543,6 +545,59 @@ recorded (LL-0015) as the next candidate mechanism to test, not
 validated, and not built into `idempotencyStore.ts` or anywhere else
 this round, per instruction.
 
+#### C-reconciliation. Does target reconciliation actually close the gap? (this round's follow-up)
+
+Direct, bounded test of LL-0015's reasoned-but-unbuilt proposal -
+nothing more. `scripts/test-durable-state-reclaim-reconciliation.ts`
+adds a minimal `reconcileAndComplete` orchestration *in the script*, not
+in `idempotencyStore.ts` - query ServiceNow by business-operation ID
+after a successful reclaim; found means record that Incident as the
+completion; absent means create, then record. Reconciliation is used
+only on this reclaim path, never on normal first-processing - `acquire()`
+remains the sole concurrency gate for new work, and this does not
+reopen Candidate B's already-rejected lookup-before-create question.
+
+Repeated OB-0020's exact two cases, then extended the same experiment
+with a third the fix itself invites scrutiny of - concurrent reclaim:
+
+- **Case 1 (crash before ServiceNow): 1 Incident, independently
+  verified.** Reconciliation found nothing and created exactly once -
+  unchanged from OB-0020's Case 1, as expected.
+- **Case 2 (crash after ServiceNow succeeds): 1 Incident, independently
+  verified as the *original* `sys_id`, not a new one.** Reconciliation
+  found the real Incident from before the simulated crash and recorded
+  it as completion; no second create happened. This is the specific
+  result OB-0020's naive reclaim could not produce (OB-0021).
+- **Case 3 (two concurrent `reclaim()` attempts against the same stale
+  record): exactly one winner, exactly one Incident, independently
+  verified.** The same atomic "constraint decides" guarantee `acquire()`
+  already had (OB-0017) extends to the reclaim path too - shown, not
+  assumed (OB-0021).
+
+**Stated plainly, against the four properties this round set out to
+check:**
+
+- Crash before the ServiceNow side effect - **SOLVED.**
+- Crash after the ServiceNow side effect, before local completion -
+  **SOLVED.**
+- Concurrent reclaim ownership - **SOLVED.**
+- The slow-original-worker race (Worker A's ServiceNow call still
+  genuinely executing when Worker B considers A stale, reclaims,
+  reconciles, finds nothing, and acts, followed by A completing) -
+  **NOT ESTABLISHED, deliberately.** This script's own structure - one
+  sequential process, each phase's store handle closed before the next
+  opens - cannot produce a scenario where an "abandoned" worker is
+  actually still running. Nothing here proves this race is safe,
+  unsafe, or even reachable; it is restated as open, not quietly
+  dropped (LL-0016).
+
+Three of four properties this candidate needed to answer are now
+answered by direct experiment, independently verified against
+ServiceNow rather than trusted from local state - a materially stronger
+position than the prior round left this candidate in. The fourth -
+genuine concurrent recovery - is the one property left, and is now the
+single most load-bearing open question for Candidate C (see §7).
+
 ### D. Salesforce Pub/Sub `ManagedSubscribe` / `CommitReplay`
 
 **What was investigated:** read directly against
@@ -608,16 +663,18 @@ identity is a publisher-contract problem, not a field-availability one.
   (OB-0017: 5/5 clean concurrent trials, using infrastructure this
   project fully controls, zero new dependency). Still the largest
   net-new piece of infrastructure this project would need to build for
-  real. OB-0018 confirmed it introduces its own serious failure mode -
-  permanent silent loss on a crash between acquiring ownership and
-  calling ServiceNow - and a direct follow-up (OB-0020) confirmed the
-  obvious fix (staleness-based reclaim) is unsafe on its own: it trades
-  the silent-loss failure back for OB-0014's duplicate whenever the
-  crash happened *after* ServiceNow already succeeded, because the
-  durable record cannot tell the two crash boundaries apart. A
-  reconciliation-based fix has been reasoned through (LL-0015) but not
-  built or tested. Doesn't eliminate the checkpoint-ordering question
-  either, it sits alongside it.
+  real. OB-0018 confirmed a serious failure mode - permanent silent loss
+  on a crash between acquiring ownership and calling ServiceNow - and a
+  bare staleness-based reclaim (OB-0020) was confirmed unsafe on its own
+  for exactly that reason. **Target reconciliation (querying ServiceNow
+  by business-operation ID during reclaim) was then built and tested,
+  and closed both reproduced crash boundaries** - crash-before and
+  crash-after, independently verified - and held under concurrent
+  reclaim too (OB-0021). What remains open is narrower and more specific
+  than before: a genuinely concurrent slow-worker race that this
+  project's sequential-process experiments cannot produce or rule out
+  (LL-0016). Doesn't eliminate the checkpoint-ordering question either,
+  it sits alongside it.
 - **D (`ManagedSubscribe`):** Solves a real, already-documented problem
   (FL-0017) but does not touch this investigation's actual question.
   Adopting it without also choosing A or C would look like progress while
@@ -698,58 +755,73 @@ FL-0017, independent of whichever of A/C is eventually chosen here.
   reconciliation check (querying ServiceNow by business-operation ID
   during reclaim) closes the gap - reasoned through, not tested
   (LL-0015).
-- **New this round:** does target reconciliation during reclaim actually
-  close the ambiguity OB-0020 demonstrated, and does its own remaining
-  edge case (a "crash" that's actually a slow in-flight request,
-  completing after the reconciliation query already ran) matter in
-  practice? Reasoned about, not tested - the specific next question for
-  Candidate C (see §7).
+- ~~Does target reconciliation during reclaim actually close the
+  ambiguity OB-0020 demonstrated?~~ - **answered this round, positively,
+  for the crash boundaries this project has reproduced:** yes - both
+  crash-before-ServiceNow and crash-after-ServiceNow-before-completion
+  are recovered correctly, independently verified, and concurrent
+  reclaim attempts still produce exactly one winner and one Incident
+  (OB-0021, LL-0016).
+- **Still open, restated rather than resolved:** the slow-original-worker
+  race (Worker A's ServiceNow call still genuinely executing when Worker
+  B considers A stale, reclaims, reconciles, finds nothing, and acts,
+  followed by A completing). This round's experiment cannot establish
+  anything about it - by construction, every phase runs sequentially in
+  one process with its store handle closed before the next phase opens,
+  so no point in the experiment has an "abandoned" worker that is
+  actually still running. Left explicitly unresolved, not quietly
+  dropped (OB-0021, LL-0016) - now the single most load-bearing open
+  question for Candidate C (see §7).
 
 ---
 
 ## 7. Recommendation: smallest next experiment to discriminate between the strongest candidates
 
 **Still not selecting an architecture, and explicitly not writing an ADR
-this round - the reason has sharpened again.** C's duplicate-prevention
-claim remains the only positive experimental evidence either candidate
-has (OB-0017, LL-0014). This round tested the specific fix its own
-crash-gap failure needed (a staleness-based reclaim, OB-0018) and found
-it **necessary but not sufficient**: it correctly recovers a truly
-abandoned operation, but reintroduces OB-0014's duplicate whenever the
-crash happened after ServiceNow already succeeded (OB-0020) - the
-durable record cannot tell the two cases apart on its own (LL-0015).
-Candidate A was deliberately not touched this round, per instruction -
-it remains exactly where the prior round left it: one path conclusively
-closed by platform design, the other unexplained after five ruled-out
-causes (FL-0018, OB-0019). An ADR still needs either A's mystery
-resolved or a tested answer to C's now-more-specific reclaim problem,
-not just "C's happy path works" or "the duplicate-prevention half is
-proven."
+this round - C has made real, verified progress, but on a narrower
+front than a full solution.** Three of the four properties Candidate C
+needed to answer are now answered by direct experiment: crash-before-
+ServiceNow, crash-after-ServiceNow-before-completion, and concurrent
+reclaim ownership are all solved by reclaim + target reconciliation,
+independently verified against ServiceNow rather than trusted from
+local state (OB-0021, LL-0016). That is the strongest evidentiary
+position either candidate has been in throughout this investigation.
+What stops an ADR is the fourth property, named and left open on
+purpose: a genuinely concurrent slow-worker race that this project's
+own sequential-process experiments cannot produce or rule out. Choosing
+C today would mean choosing a mechanism verified correct for every
+crash boundary this project has actually reproduced, but still untested
+under real concurrent recovery - a materially better position than
+"undesigned," but not yet "fully verified." Candidate A was
+deliberately not touched this round, per instruction, and remains
+exactly where the prior round left it: one path conclusively closed by
+platform design, the other unexplained after five ruled-out causes
+(FL-0018, OB-0019).
 
 **Recommended smallest next experiment - two independent paths, neither
 blocking the other:**
 
 1. **Open a real ServiceNow support case for the wizard's specific,
-   well-characterized symptom** (unchanged from the prior round, and
-   explicitly not pursued further this round per instruction): a
-   `200`-status "Database Indexes" wizard submission, on a
-   verified-elevated `security_admin` session, against a column with no
-   duplicate values on a trivial brand-new table, that never results in
-   a persisted `sys_index` record. Still the smallest possible action
-   left for Candidate A - outside this project's normal engineering
-   loop, so explicitly not something to block on.
-2. **For Candidate C: implement and test target reconciliation during
-   reclaim** (LL-0015's investigated-but-not-built proposal) - querying
-   ServiceNow directly by business-operation ID before deciding whether
-   a reclaimed operation needs to call ServiceNow again, and rerunning
-   OB-0020's exact two-case experiment against that version to confirm
-   it actually resolves Case 2 without breaking Case 1. This is now the
-   single most load-bearing open question for C, narrowed from "design a
-   reclaim policy" (done, and found insufficient alone) to "does
-   reconciliation specifically close the gap reclaim alone couldn't" -
-   including testing the one named edge case reasoning alone couldn't
-   resolve (a slow-but-not-crashed request completing after the
-   reconciliation query already ran).
+   well-characterized symptom** (unchanged, still not pursued further
+   per instruction): a `200`-status "Database Indexes" wizard
+   submission, on a verified-elevated `security_admin` session, against
+   a column with no duplicate values on a trivial brand-new table, that
+   never results in a persisted `sys_index` record. Still the smallest
+   possible action left for Candidate A - outside this project's normal
+   engineering loop, so explicitly not something to block on.
+2. **For Candidate C: reproduce the slow-worker race for real, not by
+   reasoning about it** - the same standard this project already holds
+   Candidate A to. Two genuinely concurrent processes, not one
+   sequential script: Worker A's `createIncident` call deliberately
+   delayed after `acquire()` but before it resolves, while Worker B is
+   given enough elapsed time to consider A's record stale, reclaim it,
+   reconcile (finding nothing, since A hasn't completed), and call
+   ServiceNow itself - then let A's original call finally resolve.
+   Independently verify whether the result is 1 Incident (safe) or 2
+   (the predicted duplicate). This is now the single most load-bearing
+   open question for C, narrowed from "does reconciliation work at all"
+   (answered: yes, for the cases tested) to "does it hold under genuine
+   concurrency, not just sequential crash-then-restart."
 
 Both candidates now have a clear, named, specific blocker rather than a
 vague "needs more investigation" - that is real progress toward an
@@ -815,3 +887,17 @@ implemented, per explicit instruction not to build the next mechanism
 unless required to complete the experiment - it wasn't required, since
 the experiment's question (can elapsed time alone make reclamation
 safe?) was already answered without it.
+
+A sixth round (same day, still bounded to Candidate C only) added
+`scripts/test-durable-state-reclaim-reconciliation.ts`, whose
+`reconcileAndComplete` function lives in the script itself, not in
+`idempotencyStore.ts` - the minimum orchestration needed to run this
+specific experiment, explicitly not a generalized recovery worker,
+retry framework, heartbeat system, or production state machine, per
+instruction. No new store function was added; the script reuses
+`acquire`/`reclaim`/`markCompleted`/`getRecord` exactly as they already
+existed. Still not referenced by `src/`, still not wired into the
+subscriber or `incidentAdapter.ts`. The slow-worker race this round
+was explicitly told to analyze but not solve was not built, tested, or
+worked around - it remains open, stated as such rather than quietly
+dropped or papered over (see §6, §7).

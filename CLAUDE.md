@@ -109,11 +109,25 @@ both directly rather than continuing to reason from documentation:
    not recorded" (OB-0020). The smallest fix identified (querying
    ServiceNow directly during reclaim) was reasoned through but
    deliberately not built (LL-0015).
+6. **A sixth, same-day follow-up (still bounded to Candidate C) built
+   and tested that fix — target reconciliation.** Repeated OB-0020's
+   exact two cases, but on reclaim queried ServiceNow directly by
+   business-operation ID before deciding whether to create: both cases
+   now recover to exactly one Incident, independently verified — the
+   crash-after case confirmed to reuse the *original* Incident's
+   `sys_id`, not create a duplicate. Extended with a third case
+   (two concurrent reclaim attempts against the same stale record):
+   exactly one recovery owner, same guarantee as `acquire()` (OB-0021).
+   Left explicitly open, as instructed: a genuinely concurrent
+   "slow worker, not dead" race this project's sequential-process
+   experiments cannot produce or rule out.
 
-On experimentally established facts alone, only Candidate C has ever
-been shown to enforce the core invariant, and its own necessary
-follow-up fix (reclaim) is now shown to be necessary but not
-sufficient — so that's still not enough to choose it (LL-0014, LL-0015).
+On experimentally established facts alone, Candidate C's target
+reconciliation now solves both reproduced crash boundaries and holds
+under concurrent reclaim — three of four properties this investigation
+set out to check, the strongest verified position either candidate has
+reached — but the fourth (genuine concurrent recovery) remains
+unestablished, so that's still not enough to choose it (LL-0014–LL-0016).
 Both candidates now have a specific, named, unresolved blocker rather
 than a vague "needs more investigation" — see
 `docs/architecture/0001-reliability-architecture-spike.md` §7 for both.

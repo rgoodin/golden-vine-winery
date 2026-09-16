@@ -100,8 +100,12 @@ the obvious fix - reclaiming a stale record after a timeout - and found
 it recovers a genuinely abandoned operation correctly, but creates a
 duplicate Incident if the crash actually happened after ServiceNow had
 already succeeded, because elapsed time alone can't tell those two
-cases apart. Both candidates now have a specific, unresolved blocker;
-no architecture has been chosen.
+cases apart. A second follow-up added the fix that gap pointed to -
+querying ServiceNow directly during recovery - and confirmed it closes
+both crash cases and holds when two recovery attempts race each other.
+What's left open, by design: a genuinely concurrent "still running, not
+actually dead" race that hasn't been tested yet. Both candidates now
+have a specific, unresolved blocker; no architecture has been chosen.
 
 See [`CLAUDE.md`](./CLAUDE.md) ("Current Repository State") for the
 up-to-date summary,

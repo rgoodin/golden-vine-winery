@@ -855,6 +855,80 @@ pursued further, not as something already validated.
 
 ---
 
+### LL-0016: Target reconciliation closes the two demonstrated crash gaps and holds under concurrent reclaim — one named race is still untouched
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Developer Experience
+**Evidence:** OB-0020, OB-0021
+
+**Lesson:** LL-0015 identified target reconciliation - querying
+ServiceNow by business-operation ID during reclaim, not on the normal
+processing path - as the smallest additional evidence that might
+resolve OB-0020's ambiguity, without validating it. This round built
+exactly that (nothing more) and tested it against the same two crash
+cases, plus a third the fix itself invites scrutiny of: can two
+reclaimers race each other the same way two first-time processors
+could?
+
+**Stated plainly, against the four properties this round set out to
+check:**
+
+- **Crash before the ServiceNow side effect: SOLVED.** Reconciliation
+  correctly found nothing and created the Incident exactly once
+  (OB-0021, Case 1) - matching OB-0020's Case 1 result, as expected;
+  reconciliation doesn't change behavior when there's nothing to find.
+- **Crash after the ServiceNow side effect, before local completion:
+  SOLVED.** Reconciliation found the real, already-existing Incident and
+  recorded *that* one as the completion, instead of creating a second
+  (OB-0021, Case 2) - independently verified by `sys_id`, not just by
+  count. This is the specific failure OB-0020 demonstrated and this
+  round directly closes.
+- **Concurrent reclaim ownership: SOLVED.** Two simultaneous `reclaim()`
+  calls against the same stale record produced exactly one winner and
+  exactly one Incident (OB-0021, Case 3) - the same atomic
+  "constraint decides" guarantee `acquire()` already had (OB-0017),
+  now shown to extend to the reclaim path too, not assumed to.
+- **The slow-original-worker race (Worker A still genuinely executing
+  when Worker B reclaims, reconciles, finds nothing, and acts, followed
+  by A completing): NOT ESTABLISHED, deliberately.** This experiment's
+  own structure - one sequential process, each phase's store handle
+  closed before the next opens - cannot produce a scenario where an
+  "abandoned" worker is actually still running. Nothing here proves this
+  race is safe, unsafe, or even reachable in practice; it is exactly as
+  open as it was when first named, restated rather than quietly dropped.
+
+**Why three-out-of-four resolved is real progress and not the end of
+the investigation:** the two crash boundaries this project has actually
+reproduced (OB-0009/OB-0015-style crash-before, OB-0010/OB-0016-style
+crash-after) are now both recoverable through reclaim + reconciliation,
+independently verified, not merely argued for. That is a materially
+different, stronger position for Candidate C than LL-0015 left it in.
+But the fourth property - a genuinely concurrent slow-worker scenario -
+is exactly the kind of failure mode this project's own discipline
+(FL-0011 onward) says should be reproduced before being assumed safe,
+not reasoned about and left there. A reconciliation mechanism that
+handles sequential crash-then-restart correctly but has an unexamined
+gap under real concurrency would repeat this project's oldest lesson
+(OB-0009: don't trust an untested ordering) at a new layer.
+
+**Recommended next smallest experiment:** reproduce the slow-worker race
+for real, not by reasoning about it - the same standard this project
+held FL-0018/Candidate A to. Concretely: two genuinely concurrent
+processes (not one sequential script), where Worker A's `createIncident`
+call is deliberately delayed (e.g. an artificial pause after `acquire()`
+but before the ServiceNow POST resolves) while Worker B is given enough
+elapsed time to consider A's record stale, reclaim it, reconcile
+(finding nothing, since A hasn't completed), and call ServiceNow itself
+- then let A's original, delayed call finally resolve. Independently
+verify whether the result is 1 Incident (safe - reconciliation happened
+to catch A's write in time, or something else prevented the race) or 2
+(the predicted duplicate). This is the one property this round left
+unestablished, and the smallest true test of it - not a generalized
+recovery worker, retry framework, or heartbeat system, per this
+project's standing constraint.
+
+---
+
 ## Recommended smallest Phase 3 Enablement experiment (not started)
 
 The prior recommendation (extend the detector to catch duplicates, not

@@ -147,6 +147,22 @@ package (premature until a second integration needs the same thing — see
   distinguish the two cases (OB-0020). Full analysis:
   `docs/architecture/0001-reliability-architecture-spike.md` §4
   ("C-reclaim"), `docs/devex/lessons-learned.md` LL-0015.
+- `scripts/test-durable-state-reclaim-reconciliation.ts` — direct
+  follow-up: does querying ServiceNow by business-operation ID during
+  reclaim (target reconciliation) resolve the ambiguity above? Repeats
+  the same two cases, and on reclaim queries ServiceNow first — found
+  means record that Incident as completion, don't create; absent means
+  create, then record. Result: both cases recover to exactly one
+  Incident, independently verified (the crash-after case is confirmed
+  to reuse the *original* Incident's `sys_id`, not create a new one).
+  Extended with a third case — two concurrent `reclaim()` calls against
+  the same stale record — confirming exactly one recovery owner, same
+  as `acquire()`. Explicitly does **not** establish anything about a
+  genuinely concurrent "slow worker, not dead" race (this script runs
+  everything sequentially in one process) — left open on purpose
+  (OB-0021). Full analysis:
+  `docs/architecture/0001-reliability-architecture-spike.md` §4
+  ("C-reconciliation"), `docs/devex/lessons-learned.md` LL-0016.
 - `EXPERIMENT_CRASH_BEFORE_CHECKPOINT=true npm run dev` — deterministic
   test-only crash point in `pubsubClient.ts`: exits right after an event
   is successfully processed but before its checkpoint is persisted, for
@@ -199,9 +215,16 @@ and
   sufficient**: it recovers a genuinely abandoned operation correctly,
   but reintroduces a duplicate Incident whenever the crash happened
   *after* ServiceNow already succeeded, because elapsed time alone
-  cannot tell those two cases apart (OB-0020). **No architecture has
-  been chosen and no fix has been built** - see the spike doc's §7 for
-  the current recommended next step for each candidate.
+  cannot tell those two cases apart (OB-0020). A second follow-up then
+  added target reconciliation (querying ServiceNow directly during
+  reclaim) and confirmed it closes both reproduced crash boundaries and
+  holds under concurrent reclaim (OB-0021) - the strongest verified
+  position either candidate has reached. What's left open, by design: a
+  genuinely concurrent "slow worker, not dead" race this project's
+  sequential-process experiments can't produce or rule out. **No
+  architecture has been chosen and no fix has been built** - see the
+  spike doc's §7 for the current recommended next step for each
+  candidate.
 - Giving the audit tool its own incremental "last audited position" so
   repeat runs don't always re-sweep from `EARLIEST` (LL-0011) - proposed,
   not built.

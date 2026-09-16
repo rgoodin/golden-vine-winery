@@ -996,4 +996,62 @@ suppressed or explained away.
 
 ---
 
+### OB-0021: Target reconciliation resolves both crash cases and concurrent reclaim ownership — the slow-worker race remains untested by construction
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Developer Experience
+**Category:** experiment / reliability
+
+Direct follow-up to OB-0020, testing the fix its own finding pointed to
+(LL-0015): after atomically reclaiming a stale operation, can querying
+ServiceNow directly by business-operation ID distinguish "already
+happened" from "never happened" well enough to recover both crash cases
+without either a gap or a duplicate?
+
+`scripts/test-durable-state-reclaim-reconciliation.ts` repeats OB-0020's
+exact two cases (Case 1: crash before ServiceNow; Case 2: ServiceNow
+succeeds for real, then crash before local completion) with one change
+after reclaim: instead of naively retrying, query ServiceNow by
+business-operation ID first. Found -> record the discovered Incident as
+completion, don't create. Absent -> create, then record completion.
+Reconciliation is used only on this reclaim path - the existing
+`acquire()` remains the sole concurrency gate for normal, first-time
+processing; this does not reopen Candidate B's already-rejected
+lookup-before-create question for new work.
+
+**Case 1 (crash before ServiceNow): 1 Incident, independently verified.**
+Reconciliation correctly found nothing, then created and recorded
+exactly once.
+
+**Case 2 (crash after ServiceNow succeeds): 1 Incident, independently
+verified, and confirmed to be the *original* Incident's `sys_id`** -
+not a new one. Reconciliation found the real Incident from before the
+simulated crash and recorded it as the completion; no second create was
+attempted. This is the result OB-0020's naive reclaim could not
+produce.
+
+**Extended the same experiment with a third case, per instruction, to
+check whether the fix itself is exploitable:** two concurrent `reclaim()`
+attempts fired at the same stale record. Exactly one succeeded
+(`changes > 0` for one caller, `0` for the other - the same "constraint
+decides" atomic guarantee as `acquire()`, OB-0017), and only the winner
+reconciled/completed. Independently verified: exactly 1 Incident, not 2.
+Concurrent reclaim ownership is exclusive, not merely usually exclusive.
+
+**Explicitly left unresolved, per instruction, not overlooked:** the
+slow-but-not-dead worker race identified alongside OB-0020 - Worker A's
+ServiceNow call still genuinely executing when Worker B considers A
+stale, reclaims, reconciles (finds nothing, because A hasn't written a
+result anywhere reconciliation can see yet), and calls ServiceNow
+itself, followed by A's original call finally completing. **This
+experiment does not establish anything about that race and does not
+claim to** - by construction, every phase of this script fully
+completes and closes its store handle before the next phase begins,
+so there is no point where an "original worker" is genuinely still
+executing while a second worker reclaims. Producing that race would
+require two truly concurrent, long-running processes, which this
+prototype has never modeled.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->
