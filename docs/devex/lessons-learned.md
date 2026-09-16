@@ -1121,9 +1121,10 @@ deferred.
 
 **Deliberately deferred 2026-09-15:** explicitly kept as a recorded
 candidate rather than built, so the project could move to the reliability
-architecture spike (`docs/decisions/0005-reliability-architecture-spike.md`)
-instead. The audit tool (`scripts/detect-unprocessed-events.ts`) remains
-unchanged from OB-0012's validated state.
+architecture spike (`docs/architecture/0001-reliability-architecture-spike.md`,
+later resolved by ADR 0005) instead. The audit tool
+(`scripts/detect-unprocessed-events.ts`) remains unchanged from
+OB-0012's validated state.
 
 ---
 

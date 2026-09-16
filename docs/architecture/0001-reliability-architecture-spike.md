@@ -1,6 +1,13 @@
 # Architecture Spike: Guaranteeing Exactly-One Incident per Business Event
 
-**Status:** SPIKE — investigation only. No decision made, no ADR written.
+**Status:** RESOLVED — this investigation's findings are now decided in
+[ADR 0005](../decisions/0005-external-side-effect-reliability-contract.md)
+("Reliability contract for non-transactional external side effects").
+This document remains the full experimental record; ADR 0005
+reconstructs the evidence chain concisely and makes the architecture
+decision this document deliberately stopped short of. Read this
+document for the detail behind any specific finding; read ADR 0005 for
+the decision itself.
 **Date:** originally 2026-09-15; updated across eight follow-up rounds
 spanning 2026-09-15–16 as this document's own open questions were
 tested one at a time rather than reasoned about. In order: (1) the

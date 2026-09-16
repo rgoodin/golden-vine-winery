@@ -1178,4 +1178,50 @@ been usable without writing any new ServiceNow-side code.
 
 ---
 
+### OB-0024: The reliability investigation reaches a decision — ADR 0005 adopts a two-tier contract, nothing implemented yet
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Developer Experience
+**Category:** architecture / decision
+
+With OB-0014 through OB-0023 establishing what does and doesn't hold up
+under failure for both candidates, the investigation reached the point
+this project's own operating instructions call for: "make an
+architectural decision if the existing evidence is sufficient."
+`docs/decisions/0005-external-side-effect-reliability-contract.md`
+reconstructs the evidence chain (source delivery/replay → checkpoint
+ordering → duplicate vs. loss windows → atomic durable ownership →
+crash recovery → reclaim → target reconciliation → slow-owner race →
+target enforcement investigation) and decides a **two-tier reliability
+contract**:
+
+- **Tier 1 (mandatory, any target):** recoverable at-least-once
+  processing via durable ownership + reclaim + target reconciliation,
+  mandatorily paired with audit-based detection of residual `GAP`/
+  `DUPLICATE` (extending the validated `detect-unprocessed-events.ts`
+  pattern, OB-0012) - explicitly **not** exactly-once external effects.
+- **Tier 2 (opt-in, earned per target):** exactly-once external
+  effects, only once a target is *proven*, by the same experimental
+  rigor as this entire investigation, to enforce uniqueness itself.
+  ServiceNow, as configured here, has not earned it (FL-0018, OB-0019,
+  OB-0023).
+
+The ADR distinguishes terms this investigation found routinely
+conflated - message delivery semantics, processing ownership,
+business-operation identity, external side-effect idempotency,
+reconciliation, exactly-once processing, and exactly-once external
+effect - and evaluates four options (target enforcement alone;
+integration-owned reliability alone; integration-owned reliability plus
+detection; the tiered hybrid) against evidence, not convention, before
+selecting the tiered option because it is the only one that doesn't
+either overclaim what's proven or discard what already works.
+
+**Nothing has been implemented as part of this decision.** The ADR's
+own recommended first Enablement step - wiring the already-validated
+Tier 1 mechanisms into the real service, and scheduling the audit tool
+instead of running it on demand - remains future work, not undertaken
+here.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

@@ -84,31 +84,34 @@ Observation Review and a chain of deliberate reliability experiments
 followed, establishing exactly what does and doesn't hold up under
 failure (duplicate delivery, crash recovery, silent loss, and whether
 either is detectable after the fact) - culminating in an architecture
-spike investigating how to guarantee "exactly one Incident per business
-event," and seven follow-up rounds actually testing its two strongest
-candidates rather than reasoning about them. Against ServiceNow itself:
-with no enforced uniqueness constraint, two simultaneous requests both
-succeed, creating two Incidents; getting ServiceNow to actually enforce
-one remains unresolved after five attempts with real admin access - one
-path is now conclusively explained as blocked by platform design, the
-officially supported path is not. Against a minimal prototype of an
-integration-owned durable-state store: concurrent processing, crash
-recovery, and concurrent recovery attempts are all now solved and
-independently verified - but a genuinely concurrent "still running, not
-actually dead" race, tested for real with two independent processes,
-reliably produces a duplicate Incident. Asking directly whether
-ServiceNow's own API could close that gap got a clean answer: no
-conditional-write mechanism exists, confirmed by ServiceNow's official
-documentation and by direct testing. This project has now checked every
-standard door for ServiceNow-side write enforcement; what's left is a
-real architecture decision - write new ServiceNow server-side code, or
-accept a duplicate window and rely on the existing audit tool for
-detection - not another incremental experiment. Both candidates now
-have a specific, confirmed blocker; no architecture has been chosen.
+spike, and eight follow-up rounds actually testing its two strongest
+candidates for guaranteeing "exactly one Incident per business event"
+rather than reasoning about them. Neither candidate achieves that
+guarantee unconditionally: ServiceNow itself never demonstrated a
+working uniqueness-enforcement mechanism (five attempts, plus a direct
+check confirming no conditional-write API exists to fall back on), and
+a minimal integration-owned durable-state prototype closes every
+sequential crash scenario reproduced but is defeated, deterministically,
+by a genuinely concurrent "still running, not actually dead" race
+between an original and a recovery owner.
+
+**That investigation is now decided:
+[ADR 0005](./docs/decisions/0005-external-side-effect-reliability-contract.md)
+adopts a two-tier reliability contract.** Every Golden Path integration
+gets a baseline guarantee - recoverable at-least-once processing paired
+with validated audit-based detection of any residual gap or duplicate -
+which is honest about not being exactly-once, but never lets a failure
+go silent. A stronger, exactly-once guarantee is available only for a
+target *proven* to enforce uniqueness itself, evaluated the same
+rigorous way ServiceNow was: ServiceNow has not earned it yet. Nothing
+in the decision has been implemented; the next step is wiring the
+already-validated baseline mechanisms into the real service.
 
 See [`CLAUDE.md`](./CLAUDE.md) ("Current Repository State") for the
 up-to-date summary,
+[`docs/decisions/0005-external-side-effect-reliability-contract.md`](./docs/decisions/0005-external-side-effect-reliability-contract.md)
+for the decision,
 [`docs/architecture/0001-reliability-architecture-spike.md`](./docs/architecture/0001-reliability-architecture-spike.md)
-for the full spike, and
+for the full investigation behind it, and
 [`services/integration-service/README.md`](./services/integration-service/README.md)
 for how to run it.

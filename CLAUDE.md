@@ -50,83 +50,48 @@ Phase 3 experiments** — full history in `docs/devex/lessons-learned.md`
   complete 11-event history with **zero discrepancies** from the
   independently-predicted result (OB-0012, LL-0011).
 
-**With that evidence in hand, a reliability architecture spike investigated
-(not chose) how to guarantee "exactly one Incident per business event"**
-— see `docs/architecture/0001-reliability-architecture-spike.md` (full
-round-by-round history, seven follow-up rounds, lives there — condensed
-here). Examined target-side ServiceNow idempotency, lookup-before-create,
-integration-owned durable processing state, and Salesforce's
-`ManagedSubscribe`/`CommitReplay` (read directly from the proto: open
-beta, addresses only the replay/checkpoint problem, never side-effect
-atomicity) against every failure mode reproduced so far. Two candidates
-fully covered the demonstrated failures on paper: target-side ServiceNow
-idempotency (**A**) and integration-owned durable state (**C**). Both
-were then tested directly, repeatedly, rather than reasoned about:
+**With that evidence in hand, a reliability architecture spike
+investigated how to guarantee "exactly one Incident per business
+event"** — full round-by-round history in
+`docs/architecture/0001-reliability-architecture-spike.md` (now marked
+RESOLVED). It examined target-side ServiceNow idempotency (**A**),
+lookup-before-create (**B**), integration-owned durable processing
+state (**C**), and Salesforce's `ManagedSubscribe`/`CommitReplay`
+(solves only replay/checkpoint, not side-effect atomicity) against
+every failure mode this project reproduced. Both strongest candidates
+were tested directly, repeatedly, not reasoned about: **A never
+achieved a verified ServiceNow-side enforcement mechanism** (blocked by
+platform design on one path, unexplained on the supported path —
+FL-0018, OB-0016, OB-0019, OB-0023 — including confirming no
+conditional-write API exists to lean on instead). **C** (a `node:sqlite`
+durable-ownership prototype, `scripts/lib/idempotencyStore.ts`) was
+escalated one property at a time and protects against concurrent
+processing, both reproduced crash boundaries, and concurrent reclaim
+(OB-0017, OB-0021) — but a genuinely concurrent **slow-owner race**,
+reproduced with real independent processes, defeats it deterministically
+(OB-0022), and no ServiceNow API can close that gap either (OB-0023).
 
-- **Candidate A never achieved a verified enforcement mechanism.** A
-  real concurrency test confirmed the unconstrained failure mode
-  (two concurrent creates both succeed — OB-0014). Getting ServiceNow to
-  actually enforce a unique index failed across five separate attempts
-  with real elevated `security_admin` access — one path (raw manual
-  insert) is now conclusively explained as blocked by platform design
-  (an Access Control requiring an unassignable role, `nobody`); the
-  *supported* index-creation wizard remains unexplained after ruling out
-  privilege, dirty data, the uniqueness flag, and table complexity
-  (FL-0018, OB-0016, OB-0019). Blocked pending a ServiceNow support case
-  — not pursued further in-repo.
-- **Candidate C was prototyped (`scripts/lib/idempotencyStore.ts`,
-  `node:sqlite`, zero new dependency) and tested against every failure
-  mode this project could reproduce, escalating one property at a
-  time:** concurrent initial processing — solved by construction, 5/5
-  trials (OB-0017); a crash between acquiring ownership and calling
-  ServiceNow — causes permanent silent loss with no reclaim mechanism
-  (OB-0018); a bare staleness-based reclaim — recovers a genuinely
-  abandoned operation but reintroduces a duplicate if ServiceNow had
-  already succeeded, because elapsed time alone can't distinguish the
-  two (OB-0020); target reconciliation (querying ServiceNow directly
-  during reclaim) — closes both crash boundaries and holds under
-  concurrent reclaim, independently verified (OB-0021); **and finally, a
-  genuinely concurrent slow-original-owner race, reproduced with two
-  real independent processes — confirmed unsafe, deterministically,
-  3/3 iterations (OB-0022).** That last gap cannot be closed by tuning
-  the local mechanism further; closing it for real converges on the
-  same target-side capability question Candidate A has been unable to
-  establish (LL-0017) — the two candidates' remaining blockers turn out
-  to be the same question, asked from two different layers.
-
-**That target-side question was then asked directly, not left as
-inference: does any ServiceNow API let the target atomically reject a
-stale create? Confirmed no** — checked against ServiceNow's own official
-Table API reference (no conditional-request headers documented for any
-operation) and directly tested (`If-None-Match: *` on `POST` is silently
-ignored; two concurrent creates carrying it both still succeed,
-independently verified; `PUT` cannot create a not-yet-existing record).
-Import Set coalesce and GraphQL mutations don't help either without
-writing new ServiceNow server-side code (OB-0023). This closes off
-every standard, non-custom-scripted door for ServiceNow-side write
-enforcement this project has checked.
-
-On experimentally established facts alone: Candidate C protects against
-concurrent initial processing, crash-before-side-effect,
-crash-after-side-effect, and concurrent reclaim — four of five
-properties checked — but not the slow-owner race, confirmed unsafe, and
-now confirmed unfixable by any client-reachable ServiceNow API. Both
-candidates' remaining blockers point at the same fact: no target-side
-write enforcement is available without writing new ServiceNow
-server-side code. The next step is an architecture-level fork, not
-another incremental experiment — either write that server-side code (a
-real, unmade commitment) or accept a duplicate window and lean on the
-existing, validated audit tool (`detect-unprocessed-events.ts`,
-OB-0012) for detection instead of prevention — see
-`docs/architecture/0001-reliability-architecture-spike.md` §7. Still no
-architecture chosen, no ADR written.
+**That evidence chain is now decided: [ADR 0005](docs/decisions/0005-external-side-effect-reliability-contract.md)
+adopts a two-tier reliability contract.** Tier 1 (mandatory, any
+target): recoverable at-least-once processing via durable ownership +
+reclaim + target reconciliation, **paired with** audit-based detection
+of residual `GAP`/`DUPLICATE` (`detect-unprocessed-events.ts`,
+validated zero-discrepancy in OB-0012) — explicitly **not**
+exactly-once external effects. Tier 2 (opt-in, earned per target):
+exactly-once external effects, only once a target is *proven* — by
+experiment, not documentation — to enforce uniqueness itself; ServiceNow
+has not earned it here. The Golden Vine integration today targets
+Tier 1 only. Nothing from the ADR has been implemented yet — its
+recommended first Enablement step is wiring the already-validated Tier 1
+mechanisms (ownership/reclaim/reconciliation, the audit tool on a real
+schedule) into the real service, not designing anything new.
 
 Also proposed but deliberately not built: giving the audit tool its own
 incremental "last audited position" so repeat runs don't always re-sweep
-from `EARLIEST` (LL-0011). Not yet built: any general retry/dead-letter/
-idempotency solution, an automatic (rather than on-demand) detection
-trigger, and tests. See `services/integration-service/README.md` for
-current status.
+from `EARLIEST` (LL-0011). Not yet built: Tier 1 itself (still
+experimental scripts, not wired into `src/`), any Tier 2 investigation,
+an automatic (rather than on-demand) detection trigger, and tests. See
+`services/integration-service/README.md` for current status.
 
 A Salesforce Developer Edition org (External Client App, JWT Bearer Flow)
 and a ServiceNow Developer Instance (Client Credentials grant, dedicated

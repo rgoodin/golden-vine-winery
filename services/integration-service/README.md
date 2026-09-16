@@ -220,54 +220,29 @@ and
 ## What's deliberately not here yet
 
 - A general retry / dead-letter / idempotency solution — root causes are
-  understood, confirmed by direct experiment on both possible checkpoint
-  orderings, and both failure modes are reliably detectable via a
-  validated diagnostic tool (FL-0011, FL-0012, FL-0014–FL-0017,
-  `docs/devex/lessons-learned.md` LL-0005, LL-0006, LL-0008–LL-0011). A
-  reliability architecture spike
-  ([`docs/architecture/0001-reliability-architecture-spike.md`](../../docs/architecture/0001-reliability-architecture-spike.md))
-  investigated four candidate fixes against every demonstrated failure
-  mode, followed by a focused ServiceNow concurrency experiment
-  (`scripts/test-servicenow-concurrent-idempotency.ts`): with no
-  enforced uniqueness constraint, two simultaneous create requests for
-  the same business operation both succeeded, producing two Incidents -
-  confirming the failure mode is real. Getting ServiceNow to actually
-  enforce a unique index was attempted repeatedly, including with real
-  elevated admin access and after removing a duplicate-data blocker the
-  platform itself flagged. Its raw manual-insert path is now confirmed
-  permanently blocked by a platform Access Control (role `nobody`); the
-  officially supported "Database Indexes" wizard remains unexplained
-  after five separate attempts ruled out privilege, dirty data, the
-  uniqueness flag, and table complexity as the cause - see FL-0018. A
-  matching prototype of the integration-owned durable-state candidate
-  (`scripts/lib/idempotencyStore.ts`) showed the opposite mix: its core
-  duplicate-prevention mechanism works cleanly (5/5 trials - OB-0017),
-  but a crash between acquiring ownership and calling ServiceNow causes
-  permanent silent loss (OB-0018). A direct follow-up tested the obvious
-  fix - staleness-based reclaim - and found it **necessary but not
-  sufficient**: it recovers a genuinely abandoned operation correctly,
-  but reintroduces a duplicate Incident whenever the crash happened
-  *after* ServiceNow already succeeded, because elapsed time alone
-  cannot tell those two cases apart (OB-0020). A second follow-up then
-  added target reconciliation (querying ServiceNow directly during
-  reclaim) and confirmed it closes both reproduced crash boundaries and
-  holds under concurrent reclaim (OB-0021). A third follow-up then
-  reproduced the one property still untested - a genuinely concurrent
-  "slow worker, not dead" race - using two real independent processes,
-  and confirmed it **unsafe**: 2 real Incidents result every time (3/3
-  iterations), and the local record afterward is left actively wrong,
-  not just incomplete (OB-0022). Asking directly whether ServiceNow's
-  own API surface could close that gap got a clean answer:
-  **confirmed no** - no conditional-write mechanism exists on the Table
-  API (documented and directly tested), and neither Import Set coalesce
-  nor GraphQL mutations help without writing new ServiceNow server-side
-  code (OB-0023). This project has now checked every standard,
-  non-custom-scripted door for target-side write enforcement - the
-  remaining question is an architecture-level fork (write new
-  ServiceNow server-side code, or accept a duplicate window and lean on
-  the existing audit tool for detection), not another incremental
-  experiment. **No architecture has been chosen and no fix has been
-  built** - see the spike doc's §7.
+  understood and both failure modes (duplicate, silent loss) are
+  reliably detectable via a validated diagnostic tool (FL-0011,
+  FL-0012, FL-0014–FL-0017, `docs/devex/lessons-learned.md` LL-0005,
+  LL-0006, LL-0008–LL-0011). A reliability architecture spike
+  ([`docs/architecture/0001-reliability-architecture-spike.md`](../../docs/architecture/0001-reliability-architecture-spike.md),
+  now RESOLVED) tested both strongest candidates directly across eight
+  follow-up rounds rather than reasoning about them: ServiceNow itself
+  never achieved a verified uniqueness-enforcement mechanism (FL-0018,
+  OB-0016, OB-0019, OB-0023 - including confirming no conditional-write
+  API exists to fall back on), and a `node:sqlite` durable-ownership
+  prototype (`scripts/lib/idempotencyStore.ts`) closes every reproduced
+  sequential crash boundary (OB-0017, OB-0021) but is defeated by a
+  genuinely concurrent "slow owner, not dead" race, confirmed with real
+  independent processes (OB-0022). **That investigation is now decided:
+  [ADR 0005](../../docs/decisions/0005-external-side-effect-reliability-contract.md)
+  adopts a two-tier reliability contract** - a mandatory baseline
+  (recoverable at-least-once processing paired with audit-based
+  detection of any residual gap/duplicate, not exactly-once) available
+  for any target, and an opt-in stronger guarantee (exactly-once
+  external effects) only for a target *proven* to enforce uniqueness
+  itself - which ServiceNow has not done here. **Nothing in the ADR has
+  been implemented** - the baseline mechanisms above remain experimental
+  scripts, not wired into `src/`.
 - Giving the audit tool its own incremental "last audited position" so
   repeat runs don't always re-sweep from `EARLIEST` (LL-0011) - proposed,
   not built.
