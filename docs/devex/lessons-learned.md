@@ -929,6 +929,89 @@ project's standing constraint.
 
 ---
 
+### LL-0017: Candidate C's remaining gap cannot be closed locally — it needs the same thing Candidate A has been missing all along
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Developer Experience
+**Evidence:** OB-0022
+
+**Lesson:** LL-0016 left one property of Candidate C unestablished
+because the experiment that could test it hadn't been built: whether
+target reconciliation survives a genuinely concurrent slow-owner race,
+not just a sequential crash-then-restart. This round built it, with
+real separate processes rather than a single-process simulation, and
+the answer is unambiguous: **confirmed, deterministically, 3/3
+iterations** (OB-0022). Worse than a plain duplicate - the local
+durable record ends up actively wrong, reporting "completed" with one
+Incident number while ServiceNow holds two, because whichever worker's
+completion write lands last silently overwrites the other's, with no
+fencing token to tell either worker the other exists.
+
+**Stated plainly, against all five properties this investigation has
+now checked for Candidate C, not just this round's one:**
+
+- **Concurrent initial processing (two first-time attempts for the same
+  business-operation ID): PROTECTED.** `acquire()`'s atomic
+  create-if-absent enforces this by construction - 5/5 clean trials
+  (OB-0017).
+- **Crash before the external side effect: PROTECTED**, via reclaim +
+  target reconciliation - independently verified (OB-0021, Case 1).
+- **Crash after the external side effect, before local completion:
+  PROTECTED**, via the same mechanism - independently verified, by
+  matching `sys_id`, not just by count (OB-0021, Case 2).
+- **Concurrent reclaim (two recovery attempts racing for the same stale
+  record): PROTECTED.** `reclaim()`'s atomic conditional `UPDATE`
+  permits exactly one winner - independently verified (OB-0021, Case
+  3).
+- **Slow-original-owner/reclaimer overlap: NOT PROTECTED.** Confirmed,
+  not merely suspected, with genuinely independent processes, 3/3
+  iterations (OB-0022).
+
+**Why this can't be fixed by extending the local mechanism further:**
+the failure isn't that reclaim fires too early relative to some
+fixed threshold - any threshold has this problem, because the question
+being asked ("is the original owner dead?") is fundamentally
+unanswerable from elapsed time alone, no matter how it's tuned. A
+shorter threshold reclaims live workers more often; a longer one leaves
+real crashes unrecovered longer; neither threshold closes the gap,
+because the gap isn't a tuning problem. The only two ways to actually
+close it are: (a) stop the original worker from acting after being
+fenced - which requires checking fencing status *immediately before*
+the external call, and even then a worker paused between that check and
+the actual network call (a real possibility, not a contrived one - the
+same class of problem Kleppmann's "How to do distributed locking"
+describes for lease-based systems generally) can still slip through
+locally; or (b) have the *target itself* refuse the second write. (a)
+only ever narrows the window, never closes it, because the check and
+the call can never be perfectly atomic from the caller's side alone.
+(b) is a real close - but it is exactly Candidate A's unresolved
+question (FL-0018): can ServiceNow enforce a uniqueness invariant on
+this identifier at all. **Candidate C's best-case robustness, at the
+last mile, depends on the same target-side capability Candidate A has
+been trying and failing to establish this entire investigation.** They
+are not two fully independent alternatives the way the original spike
+framed them - C's remaining gap and A's open question turn out to be
+the same question, asked from two different layers.
+
+**Recommended next smallest investigation (not an implementation, per
+instruction):** investigate whether ServiceNow's Table API exposes any
+conditional-write mechanism usable on `POST` (create) - not the
+`unique_index`/`sys_index` mechanism FL-0018 already exhausted, but
+whether an optimistic-concurrency-style precondition (ServiceNow
+documents `sys_mod_count`-based conditional `PATCH`/`PUT` for updates -
+whether anything comparable exists or could be adapted for create is
+unknown and unresearched) could let ServiceNow itself reject a write
+that arrives after a given fencing/generation value has been
+superseded. This is a different, narrower question than FL-0018's
+(which was about a schema-level uniqueness constraint); it asks about
+per-request conditional semantics instead. Do not implement local
+fencing as a substitute - per the reasoning above, a local-only fencing
+check would reduce the race's probability without being able to prove
+it eliminated, and this project's standard throughout has been
+demonstrated safety, not reduced likelihood.
+
+---
+
 ## Recommended smallest Phase 3 Enablement experiment (not started)
 
 The prior recommendation (extend the detector to catch duplicates, not

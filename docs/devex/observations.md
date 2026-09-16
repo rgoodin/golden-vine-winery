@@ -1054,4 +1054,59 @@ prototype has never modeled.
 
 ---
 
+### OB-0022: The slow-owner race is real, deterministic, and confirmed with genuinely independent processes — 3/3 iterations produced a duplicate
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Developer Experience
+**Category:** experiment / reliability
+
+Direct reproduction of the race OB-0020/OB-0021 named but explicitly
+could not test, because every experiment so far ran sequentially in one
+process. This one doesn't: `scripts/lib/slowWorkerA.ts` and
+`scripts/lib/slowWorkerB.ts` are separate scripts, spawned as genuinely
+independent OS processes (`child_process.spawn`, each with its own
+Node runtime) by `scripts/test-durable-state-slow-worker-race.ts`, both
+operating against the same on-disk SQLite store and the same real
+ServiceNow instance at the same time.
+
+**Worker A** ("original owner"): acquires a fresh business-operation
+ID, waits 6000ms (simulating real, still-in-progress work - not a
+crash), then calls ServiceNow for real and records completion. **Worker
+B** ("recovery owner"): starts ~300ms after Worker A, waits 2500ms
+(past the 2000ms staleness threshold), reclaims the now-stale record,
+reconciles against ServiceNow (the existing "C-reconciliation"
+mechanism from OB-0021, unmodified), finds nothing (because Worker A
+hasn't called ServiceNow yet), and creates its own Incident.
+
+**Result, independently verified against ServiceNow, 3/3 iterations:**
+two real Incidents exist for the same business-operation ID every time
+(e.g. `INC0010022`/`INC0010023`, `INC0010024`/`INC0010025`,
+`INC0010026`/`INC0010027`). No workaround was added to prevent or hide
+this - both Incidents were left in place and the result recorded as-is,
+per instruction. The wide, fixed timing margin (Worker A's delay is 3x
+Worker B's full reclaim-through-completion cycle) means this is a
+deterministic confirmation, not a lucky scheduling result - the same
+outcome occurred on every run with no variance.
+
+**A second, sharper finding beyond "a duplicate exists":** the *local*
+durable record after both workers finish shows only **one** Incident -
+whichever worker's `markCompleted()` call happened to run last (Worker
+A, since it's the slower of the two). Neither worker's completion write
+checks whether it still owns the record before writing - there is no
+fencing token, so Worker A has no way to know it was reclaimed. The
+local record is therefore not merely incomplete (as in OB-0018's honest
+"still `in_flight`" signal) but **actively misleading**: it reports
+"completed" with exactly one Incident number, while ServiceNow actually
+holds two. A system trusting only the local record would never notice
+the duplicate at all.
+
+Neither worker behaved incorrectly given the information available to
+it - Worker B correctly followed the existing reclaim + reconciliation
+logic exactly as designed, and found what was true to find at that
+moment; Worker A correctly completed the work it was originally given.
+The mechanism has no way to give either of them the missing piece: that
+the other was also acting on the same business-operation ID.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

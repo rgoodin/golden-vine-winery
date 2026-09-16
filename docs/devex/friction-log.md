@@ -1078,4 +1078,56 @@ here.
 
 ---
 
+### FL-0021: Proving a race is genuine requires genuinely separate processes - and that costs real coordination overhead
+
+**Date:** 2026-09-16
+**Phase:** Phase 1 — Developer Experience
+
+#### Observation
+
+Every prior durable-state experiment (OB-0017, OB-0018, OB-0020,
+OB-0021) ran entirely inside one Node process, using `Promise.all` or
+sequential `await` calls to simulate concurrency. That was good enough
+for those questions, but FL-0018's own standing lesson (don't trust
+reasoning where a real test is possible) applied here too: the
+slow-owner race specifically depends on one worker being genuinely
+still alive and executing while another acts - something one
+single-threaded process cannot honestly produce, only simulate.
+
+#### Friction
+
+Building `scripts/test-durable-state-slow-worker-race.ts` meant
+spawning two real OS processes (`child_process.spawn('npx', ['ts-node', ...])`)
+instead of calling two functions. That introduced coordination concerns
+none of the earlier scripts had: each `ts-node` cold start carries real
+startup overhead (roughly 1-2 seconds before a spawned worker's own
+code even begins running), so the deliberate timing margins
+(Worker A's delay vs. Worker B's wait-before-reclaim) had to be sized
+generously enough to absorb that overhead reliably, not just cover the
+logical delay being tested. Getting `cwd` right for each spawned
+process also mattered in a way it hadn't before - `dotenv/config`
+(loaded by `src/config.ts`) resolves `.env` relative to
+`process.cwd()`, so a spawned child needed its `cwd` explicitly set to
+the service root or it would silently fail to find ServiceNow
+credentials.
+
+#### Impact
+
+Small and one-time - the experiment worked on the first real run once
+these were accounted for - but real: an experiment like this takes
+noticeably longer to write correctly and run (each iteration is
+several seconds of deliberate, real wall-clock delay plus process
+spawn overhead, not milliseconds) than the single-process alternative
+it replaced.
+
+#### Possible Enablement
+
+Not decided, and not needed yet - this project has only needed this
+pattern once so far. If genuinely-concurrent-process testing becomes a
+recurring need, a small shared spawn-and-collect helper (parsing
+`WORKER_*:` marker lines from stdout, as this script does inline) would
+be worth extracting - premature to build from a single use.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

@@ -85,27 +85,21 @@ followed, establishing exactly what does and doesn't hold up under
 failure (duplicate delivery, crash recovery, silent loss, and whether
 either is detectable after the fact) - culminating in an architecture
 spike investigating how to guarantee "exactly one Incident per business
-event," followed by matched concurrency experiments against both
-strongest candidates: against ServiceNow, with no enforced uniqueness
-constraint, two simultaneous requests both succeeded, creating two
-Incidents - and actually enforcing that constraint remains unresolved
-despite real admin access - a follow-up investigation later confirmed
-*why* the manual path is blocked (a deliberate platform permission
-restriction) while the officially supported path remains unexplained
-after ruling out every plausible cause. Against a minimal prototype of
-an integration-owned durable-state store, the same test came back clean
-5/5 times - but simulating a crash mid-operation revealed it trades that
-win for a different failure: permanent silent loss. A follow-up tested
-the obvious fix - reclaiming a stale record after a timeout - and found
-it recovers a genuinely abandoned operation correctly, but creates a
-duplicate Incident if the crash actually happened after ServiceNow had
-already succeeded, because elapsed time alone can't tell those two
-cases apart. A second follow-up added the fix that gap pointed to -
-querying ServiceNow directly during recovery - and confirmed it closes
-both crash cases and holds when two recovery attempts race each other.
-What's left open, by design: a genuinely concurrent "still running, not
-actually dead" race that hasn't been tested yet. Both candidates now
-have a specific, unresolved blocker; no architecture has been chosen.
+event," and seven follow-up rounds actually testing its two strongest
+candidates rather than reasoning about them. Against ServiceNow itself:
+with no enforced uniqueness constraint, two simultaneous requests both
+succeed, creating two Incidents; getting ServiceNow to actually enforce
+one remains unresolved after five attempts with real admin access - one
+path is now conclusively explained as blocked by platform design, the
+officially supported path is not. Against a minimal prototype of an
+integration-owned durable-state store: concurrent processing, crash
+recovery, and concurrent recovery attempts are all now solved and
+independently verified - but a genuinely concurrent "still running, not
+actually dead" race, tested for real with two independent processes,
+reliably produces a duplicate Incident, and closing that gap turns out
+to depend on the same open question as the ServiceNow side. Both
+candidates now have a specific, confirmed blocker; no architecture has
+been chosen.
 
 See [`CLAUDE.md`](./CLAUDE.md) ("Current Repository State") for the
 up-to-date summary,

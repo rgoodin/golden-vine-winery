@@ -163,6 +163,24 @@ package (premature until a second integration needs the same thing — see
   (OB-0021). Full analysis:
   `docs/architecture/0001-reliability-architecture-spike.md` §4
   ("C-reconciliation"), `docs/devex/lessons-learned.md` LL-0016.
+- `scripts/lib/slowWorkerA.ts` + `scripts/lib/slowWorkerB.ts` +
+  `scripts/test-durable-state-slow-worker-race.ts` — direct follow-up:
+  reproduces the "slow worker, not dead" race OB-0021 left open, using
+  genuinely independent OS processes (`child_process.spawn`, each its
+  own Node runtime), not a single-process simulation. Worker A acquires
+  and waits 6s before calling ServiceNow for real (simulating real
+  in-progress work); Worker B starts ~300ms later, waits past the
+  staleness threshold, reclaims, reconciles (finds nothing, since Worker
+  A hasn't completed), and creates its own Incident. Result: **2 real
+  Incidents for the same business-operation ID, independently verified,
+  3/3 iterations** — deterministic, not a scheduling fluke, given the
+  wide fixed timing margin. Worse than a plain duplicate: the *local*
+  record afterward shows only one Incident (whichever worker completed
+  last, silently overwriting the other — no fencing token exists to
+  prevent this), so the record ends up actively wrong, not merely
+  incomplete. Full analysis:
+  `docs/architecture/0001-reliability-architecture-spike.md` §4
+  ("C-slow-owner-race"), `docs/devex/lessons-learned.md` LL-0017.
 - `EXPERIMENT_CRASH_BEFORE_CHECKPOINT=true npm run dev` — deterministic
   test-only crash point in `pubsubClient.ts`: exits right after an event
   is successfully processed but before its checkpoint is persisted, for
@@ -218,13 +236,16 @@ and
   cannot tell those two cases apart (OB-0020). A second follow-up then
   added target reconciliation (querying ServiceNow directly during
   reclaim) and confirmed it closes both reproduced crash boundaries and
-  holds under concurrent reclaim (OB-0021) - the strongest verified
-  position either candidate has reached. What's left open, by design: a
-  genuinely concurrent "slow worker, not dead" race this project's
-  sequential-process experiments can't produce or rule out. **No
-  architecture has been chosen and no fix has been built** - see the
-  spike doc's §7 for the current recommended next step for each
-  candidate.
+  holds under concurrent reclaim (OB-0021). A third follow-up then
+  reproduced the one property still untested - a genuinely concurrent
+  "slow worker, not dead" race - using two real independent processes,
+  and confirmed it **unsafe**: 2 real Incidents result every time (3/3
+  iterations), and the local record afterward is left actively wrong,
+  not just incomplete (OB-0022). That gap can't be closed by tuning the
+  local mechanism further - it converges on the same target-side
+  question Candidate A has been unable to answer. **No architecture has
+  been chosen and no fix has been built** - see the spike doc's §7 for
+  the current recommended next step for each candidate.
 - Giving the audit tool its own incremental "last audited position" so
   repeat runs don't always re-sweep from `EARLIEST` (LL-0011) - proposed,
   not built.

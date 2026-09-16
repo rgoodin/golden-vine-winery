@@ -52,86 +52,60 @@ Phase 3 experiments** — full history in `docs/devex/lessons-learned.md`
 
 **With that evidence in hand, a reliability architecture spike investigated
 (not chose) how to guarantee "exactly one Incident per business event"**
-— see `docs/architecture/0001-reliability-architecture-spike.md` and
-`docs/devex/observations.md` OB-0013. Examined target-side ServiceNow
-idempotency, lookup-before-create, integration-owned durable processing
-state, and Salesforce's `ManagedSubscribe`/`CommitReplay` (read directly
-from the proto: it's explicit open beta and only ever addresses the
-replay/checkpoint problem, never the side-effect atomicity one) against
-every failure mode reproduced so far. Two candidates fully cover the
-demonstrated failures on paper: target-side ServiceNow idempotency and
-integration-owned durable state. Three focused follow-ups then tested
-both directly rather than continuing to reason from documentation:
+— see `docs/architecture/0001-reliability-architecture-spike.md` (full
+round-by-round history, seven follow-up rounds, lives there — condensed
+here). Examined target-side ServiceNow idempotency, lookup-before-create,
+integration-owned durable processing state, and Salesforce's
+`ManagedSubscribe`/`CommitReplay` (read directly from the proto: open
+beta, addresses only the replay/checkpoint problem, never side-effect
+atomicity) against every failure mode reproduced so far. Two candidates
+fully covered the demonstrated failures on paper: target-side ServiceNow
+idempotency (**A**) and integration-owned durable state (**C**). Both
+were then tested directly, repeatedly, rather than reasoned about:
 
-1. **A genuine concurrency test against ServiceNow** (two simultaneous
-   create requests via `Promise.all`, not lookup-then-create) confirmed
-   the unconstrained failure mode is real: with no enforced uniqueness
-   constraint, both requests succeeded, creating two Incidents for one
-   business operation (OB-0014).
-2. **Getting ServiceNow to actually enforce a unique index remains
-   unresolved**, despite real admin access, correctly elevating
-   `security_admin` for the session (a genuine platform distinction —
-   assigned vs. active), and removing a duplicate-data blocker the
-   platform itself flagged. Even with every plausible cause ruled out,
-   ServiceNow's index-creation UI returns success-shaped responses
-   without ever persisting a constraint, checked four independent ways
-   (FL-0018, OB-0016).
-3. **A matching investigation-only prototype of the durable-state
-   candidate** (`node:sqlite`, zero new dependency, a real `PRIMARY KEY`
-   constraint as the atomic gate) showed the opposite mix: its core
-   duplicate-prevention mechanism works cleanly, 5/5 concurrent trials
-   (OB-0017) — but simulating a crash between acquiring ownership and
-   calling ServiceNow causes **permanent silent loss**, with no reclaim
-   mechanism designed or built (OB-0018), the same lesson as LL-0009's
-   checkpoint-ordering finding, now confirmed for this candidate too.
-4. **A fourth, bounded follow-up (next day) finally identified *why* the
-   raw index-creation path fails**: its own Access Control requires a
-   role no user can hold (`admin_overrides=false`, required role
-   `nobody`) — a deliberate ServiceNow platform restriction, confirmed by
-   reading the ACL directly, not a fixable gap. The *supported* wizard
-   path remains unexplained despite ruling out privilege, dirty data, the
-   uniqueness flag, and table complexity across five total attempts
-   (tested down to a brand-new, empty, single-column table) — genuinely
-   narrower evidence than before, still not a definitive answer
-   (FL-0018, OB-0019). Per instruction, Candidate C's reclaim design was
-   explicitly not touched this round.
-5. **A fifth, same-day follow-up (bounded to Candidate C only — A left
-   untouched, pending external ServiceNow input) tested whether a stale
-   `in_flight` record can be safely reclaimed.** Extended the prototype
-   by exactly one function, `reclaim()` — an atomic elapsed-time check,
-   not a lease/heartbeat framework — then produced two crashed
-   operations with an *identical* durable-record shape via different
-   real paths (one that never called ServiceNow, one where ServiceNow
-   genuinely succeeded first). Result: staleness-based reclaim recovers
-   the genuinely-abandoned one correctly (exactly one Incident), but
-   reintroduces a duplicate for the one that already succeeded — proving
-   elapsed time alone cannot distinguish "abandoned" from "succeeded but
-   not recorded" (OB-0020). The smallest fix identified (querying
-   ServiceNow directly during reclaim) was reasoned through but
-   deliberately not built (LL-0015).
-6. **A sixth, same-day follow-up (still bounded to Candidate C) built
-   and tested that fix — target reconciliation.** Repeated OB-0020's
-   exact two cases, but on reclaim queried ServiceNow directly by
-   business-operation ID before deciding whether to create: both cases
-   now recover to exactly one Incident, independently verified — the
-   crash-after case confirmed to reuse the *original* Incident's
-   `sys_id`, not create a duplicate. Extended with a third case
-   (two concurrent reclaim attempts against the same stale record):
-   exactly one recovery owner, same guarantee as `acquire()` (OB-0021).
-   Left explicitly open, as instructed: a genuinely concurrent
-   "slow worker, not dead" race this project's sequential-process
-   experiments cannot produce or rule out.
+- **Candidate A never achieved a verified enforcement mechanism.** A
+  real concurrency test confirmed the unconstrained failure mode
+  (two concurrent creates both succeed — OB-0014). Getting ServiceNow to
+  actually enforce a unique index failed across five separate attempts
+  with real elevated `security_admin` access — one path (raw manual
+  insert) is now conclusively explained as blocked by platform design
+  (an Access Control requiring an unassignable role, `nobody`); the
+  *supported* index-creation wizard remains unexplained after ruling out
+  privilege, dirty data, the uniqueness flag, and table complexity
+  (FL-0018, OB-0016, OB-0019). Blocked pending a ServiceNow support case
+  — not pursued further in-repo.
+- **Candidate C was prototyped (`scripts/lib/idempotencyStore.ts`,
+  `node:sqlite`, zero new dependency) and tested against every failure
+  mode this project could reproduce, escalating one property at a
+  time:** concurrent initial processing — solved by construction, 5/5
+  trials (OB-0017); a crash between acquiring ownership and calling
+  ServiceNow — causes permanent silent loss with no reclaim mechanism
+  (OB-0018); a bare staleness-based reclaim — recovers a genuinely
+  abandoned operation but reintroduces a duplicate if ServiceNow had
+  already succeeded, because elapsed time alone can't distinguish the
+  two (OB-0020); target reconciliation (querying ServiceNow directly
+  during reclaim) — closes both crash boundaries and holds under
+  concurrent reclaim, independently verified (OB-0021); **and finally, a
+  genuinely concurrent slow-original-owner race, reproduced with two
+  real independent processes — confirmed unsafe, deterministically,
+  3/3 iterations (OB-0022).** That last gap cannot be closed by tuning
+  the local mechanism further; closing it for real converges on the
+  same target-side capability question Candidate A has been unable to
+  establish (LL-0017) — the two candidates' remaining blockers turn out
+  to be the same question, asked from two different layers.
 
-On experimentally established facts alone, Candidate C's target
-reconciliation now solves both reproduced crash boundaries and holds
-under concurrent reclaim — three of four properties this investigation
-set out to check, the strongest verified position either candidate has
-reached — but the fourth (genuine concurrent recovery) remains
-unestablished, so that's still not enough to choose it (LL-0014–LL-0016).
-Both candidates now have a specific, named, unresolved blocker rather
-than a vague "needs more investigation" — see
-`docs/architecture/0001-reliability-architecture-spike.md` §7 for both.
-Still no architecture chosen, no ADR written.
+On experimentally established facts alone: Candidate C protects against
+concurrent initial processing, crash-before-side-effect,
+crash-after-side-effect, and concurrent reclaim — four of five
+properties checked, the strongest verified position either candidate
+has reached — but not the slow-owner race, confirmed unsafe rather than
+merely untested. Both candidates now have a specific, named, confirmed
+blocker rather than a vague "needs more investigation" — see
+`docs/architecture/0001-reliability-architecture-spike.md` §7 for both,
+including the next recommended investigation (whether ServiceNow
+supports any conditional-write precondition on `create`, a narrower
+question than FL-0018's schema-level one). Still no architecture chosen,
+no ADR written.
 
 Also proposed but deliberately not built: giving the audit tool its own
 incremental "last audited position" so repeat runs don't always re-sweep

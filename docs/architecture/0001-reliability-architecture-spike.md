@@ -1,22 +1,26 @@
 # Architecture Spike: Guaranteeing Exactly-One Incident per Business Event
 
 **Status:** SPIKE — investigation only. No decision made, no ADR written.
-**Date:** 2026-09-15, updated six times: three focused ServiceNow
-target-side idempotency follow-ups the same day (§3a/§3b, then a direct
-continuation resolving two real causes behind §3a's open question — see
-§3a's first "Follow-up" note — then an investigation-only durable-state
-prototype tested under matched concurrency, §4's "C-prototype"
-subsection); a fourth, bounded follow-up the next day (2026-09-16) that
-identified the raw `sys_index` path's root cause with certainty and
-narrowed the supported wizard's still-unexplained failure (§3a's second
-"Follow-up" note); a fifth, same-day follow-up testing whether a stale
-durable record from that prototype can be safely reclaimed after a
-crash (§4's "C-reclaim" subsection); and a sixth, same-day follow-up
-testing whether target reconciliation actually closes the gap reclaim
-alone couldn't — see §4's "C-reconciliation" subsection.
-**Related:** `docs/devex/friction-log.md` FL-0011–FL-0020,
-`docs/devex/observations.md` OB-0007–OB-0021,
-`docs/devex/lessons-learned.md` LL-0005–LL-0016,
+**Date:** originally 2026-09-15; updated across seven follow-up rounds
+spanning 2026-09-15–16 as this document's own open questions were
+tested one at a time rather than reasoned about. In order: (1) the
+initial spike (§1–§7 as originally written); (2) a ServiceNow
+concurrency test proving the unconstrained failure mode is real
+(§3b); (3) resolving two false leads behind the admin-UI index-creation
+mystery (§3a's first "Follow-up"); (4) a durable-state prototype tested
+under matched concurrency (§4 "C-prototype"); (5) identifying the raw
+`sys_index` path's root cause with certainty and narrowing the
+supported wizard's still-unexplained failure (§3a's second "Follow-up");
+(6) testing whether a stale durable record can be safely reclaimed
+(§4 "C-reclaim") and whether target reconciliation closes the gap
+reclaim alone couldn't (§4 "C-reconciliation"); (7) reproducing the
+slow-original-owner race with genuinely independent processes and
+confirming it unsafe (§4 "C-slow-owner-race"). Full round-by-round
+detail lives in the DevEx journal entries cited throughout, not
+repeated here.
+**Related:** `docs/devex/friction-log.md` FL-0011–FL-0021,
+`docs/devex/observations.md` OB-0007–OB-0022,
+`docs/devex/lessons-learned.md` LL-0005–LL-0017,
 `docs/decisions/0001`–`0004`
 
 ## Purpose
@@ -418,12 +422,12 @@ project has never needed and doesn't have.
 
 | Failure mode | Result |
 |---|---|
-| Crash before target side effect | **Confirmed solved with target reconciliation** (see C-reconciliation below) - reclaim + a ServiceNow lookup by business-operation ID correctly found nothing and created exactly once (OB-0021, Case 1). Solved for the two crash boundaries this project has reproduced; the slow-worker race (see C-reconciliation) remains untested |
-| Crash after target side effect, before checkpoint | **Confirmed solved with target reconciliation.** Reclaim + reconciliation found the real, already-existing Incident and recorded it as completion instead of creating a duplicate, verified by matching `sys_id` (OB-0021, Case 2) - the exact failure staleness-only reclaim produced (OB-0020) is now closed for this crash boundary |
-| Replay/redelivery | Solved by the same mechanism as the two rows above, for the crash boundaries actually reproduced |
+| Crash before target side effect | **Confirmed solved with target reconciliation**, for a genuine crash - reclaim + a ServiceNow lookup by business-operation ID correctly found nothing and created exactly once (OB-0021, Case 1). **Confirmed UNSOLVED if the "crash" is actually a slow but live worker** (see C-slow-owner-race below) - reconciliation cannot distinguish "truly abandoned" from "still running," and a real duplicate results, deterministically (OB-0022) |
+| Crash after target side effect, before checkpoint | **Confirmed solved with target reconciliation**, for a genuine crash. Reclaim + reconciliation found the real, already-existing Incident and recorded it as completion instead of creating a duplicate, verified by matching `sys_id` (OB-0021, Case 2) |
+| Replay/redelivery | Solved by the same mechanism as the two rows above, for a genuine crash; unsolved for the slow-owner variant, same as the first row |
 | Duplicate source publication | **Confirmed solved** (OB-0017) - keyed on business identity, not replay position, matching Candidate A's intended coverage, and unlike Candidate A this was verified working, not just designed |
 | Temporary ServiceNow failure | Could be extended to support real retry-with-backoff, which no other candidate addresses - but designing that further is out of this investigation's scope |
-| Process restart | Same as "crash before/after target side effect" above - solved for sequential crash-then-restart, not yet tested under genuine concurrent recovery (the slow-worker race) |
+| Process restart | Same as "crash before/after target side effect" above - solved for a genuine crash, confirmed unsolved for the slow-owner variant (OB-0022) |
 
 Most complete and most platform-agnostic candidate on paper, but the
 largest to build - real durable storage is net-new infrastructure for
@@ -598,6 +602,62 @@ position than the prior round left this candidate in. The fourth -
 genuine concurrent recovery - is the one property left, and is now the
 single most load-bearing open question for Candidate C (see §7).
 
+#### C-slow-owner-race. Does reconciliation survive a genuinely concurrent slow owner? (this round's follow-up)
+
+Direct reproduction of the one property C-reconciliation left open -
+built with genuinely independent processes this time, not a
+single-process simulation, because the question itself (is the
+original owner still alive and working?) cannot be honestly tested any
+other way.
+
+`scripts/lib/slowWorkerA.ts` and `scripts/lib/slowWorkerB.ts` run as
+separate OS processes (`child_process.spawn`, each its own Node
+runtime), coordinated by `scripts/test-durable-state-slow-worker-race.ts`,
+both operating against the same on-disk store and the same real
+ServiceNow instance concurrently. Worker A ("original owner") acquires,
+waits 6 seconds (simulating real in-progress work, not a crash), then
+calls ServiceNow for real. Worker B ("recovery owner") starts ~300ms
+later, waits 2.5 seconds (past the 2-second staleness threshold),
+reclaims, reconciles (the unmodified C-reconciliation mechanism), finds
+nothing (because Worker A hasn't called ServiceNow yet), and creates
+its own Incident.
+
+**Result: confirmed, deterministically, 3/3 iterations** (OB-0022). Two
+real Incidents exist in ServiceNow for the same business-operation ID
+every time, independently verified. The wide, fixed timing margin (six
+times the staleness threshold) means this is not a lucky-scheduling
+artifact - the same outcome occurred on every run with no variance.
+Both Incidents were left in place each time; no deduplication or
+workaround was added to make the experiment "pass."
+
+**A sharper finding than "a duplicate exists":** the *local* durable
+record afterward shows only one Incident - whichever worker's
+`markCompleted()` ran last (Worker A, being slower). Neither worker
+checks whether it still owns the record before completing - there is no
+fencing token - so the local record isn't just incomplete (as in
+OB-0018's honest "still `in_flight`"), it is **actively wrong**: it
+reports "completed" with one Incident number while ServiceNow holds
+two. Nothing about the mechanism itself would ever surface this
+discrepancy.
+
+**Why this can't be closed by tuning the local mechanism further:** the
+question "is the original owner dead?" is unanswerable from elapsed
+time alone regardless of the threshold chosen - a shorter threshold
+reclaims live workers more often, a longer one leaves real crashes
+unrecovered longer, and neither closes the gap, because it isn't a
+tuning problem. Closing it for real requires either the original
+worker to be stopped from acting after being fenced (which itself can
+only narrow, never provably close, the window - a worker paused between
+checking its fencing status and making the actual network call can
+still slip through, the same structural problem lease-based distributed
+locking schemes have generally), or the *target* refusing the second
+write. The second option is exactly Candidate A's still-open question
+(FL-0018): can ServiceNow enforce uniqueness on this identifier at all.
+**Candidate C's remaining gap and Candidate A's open question turn out
+to be the same question, asked from two different layers** - not fully
+independent alternatives the way the original spike framed them
+(LL-0017).
+
 ### D. Salesforce Pub/Sub `ManagedSubscribe` / `CommitReplay`
 
 **What was investigated:** read directly against
@@ -666,15 +726,16 @@ identity is a publisher-contract problem, not a field-availability one.
   real. OB-0018 confirmed a serious failure mode - permanent silent loss
   on a crash between acquiring ownership and calling ServiceNow - and a
   bare staleness-based reclaim (OB-0020) was confirmed unsafe on its own
-  for exactly that reason. **Target reconciliation (querying ServiceNow
-  by business-operation ID during reclaim) was then built and tested,
-  and closed both reproduced crash boundaries** - crash-before and
-  crash-after, independently verified - and held under concurrent
-  reclaim too (OB-0021). What remains open is narrower and more specific
-  than before: a genuinely concurrent slow-worker race that this
-  project's sequential-process experiments cannot produce or rule out
-  (LL-0016). Doesn't eliminate the checkpoint-ordering question either,
-  it sits alongside it.
+  for exactly that reason. Target reconciliation (querying ServiceNow by
+  business-operation ID during reclaim) was then built and tested, and
+  closed both reproduced crash boundaries and concurrent reclaim
+  (OB-0021). **Tested against a genuinely concurrent slow-owner race
+  (two real processes, not a simulation) and confirmed unsafe,
+  deterministically, 3/3 iterations** (OB-0022) - and this specific gap
+  cannot be closed by tuning the local mechanism further; closing it for
+  real converges on the same target-side capability Candidate A has been
+  unable to establish (LL-0017). Doesn't eliminate the checkpoint-
+  ordering question either, it sits alongside it.
 - **D (`ManagedSubscribe`):** Solves a real, already-documented problem
   (FL-0017) but does not touch this investigation's actual question.
   Adopting it without also choosing A or C would look like progress while
@@ -762,41 +823,52 @@ FL-0017, independent of whichever of A/C is eventually chosen here.
   are recovered correctly, independently verified, and concurrent
   reclaim attempts still produce exactly one winner and one Incident
   (OB-0021, LL-0016).
-- **Still open, restated rather than resolved:** the slow-original-worker
-  race (Worker A's ServiceNow call still genuinely executing when Worker
-  B considers A stale, reclaims, reconciles, finds nothing, and acts,
-  followed by A completing). This round's experiment cannot establish
-  anything about it - by construction, every phase runs sequentially in
-  one process with its store handle closed before the next phase opens,
-  so no point in the experiment has an "abandoned" worker that is
-  actually still running. Left explicitly unresolved, not quietly
-  dropped (OB-0021, LL-0016) - now the single most load-bearing open
-  question for Candidate C (see §7).
+- ~~The slow-original-worker race (Worker A's ServiceNow call still
+  genuinely executing when Worker B considers A stale, reclaims,
+  reconciles, finds nothing, and acts, followed by A completing)~~ -
+  **answered this round, with genuinely independent processes, not a
+  simulation: confirmed unsafe, deterministically, 3/3 iterations**
+  (OB-0022). Two real Incidents result every time, and the local
+  durable record ends up actively wrong afterward (reporting one
+  Incident while ServiceNow holds two), not merely incomplete. This
+  gap cannot be closed by tuning the local reclaim/reconciliation
+  mechanism further - see LL-0017 for why it structurally converges on
+  the same open question as Candidate A.
+- **New this round:** does ServiceNow's Table API expose any
+  conditional-write mechanism usable on `POST` (create) - not the
+  schema-level `unique_index` mechanism FL-0018 already exhausted, but
+  a per-request, optimistic-concurrency-style precondition that could
+  let ServiceNow itself reject a write superseded by a newer
+  fencing/generation value? Unresearched - the specific next question
+  for Candidate C (see §7), and notably not the same question FL-0018
+  already asked and left open.
 
 ---
 
 ## 7. Recommendation: smallest next experiment to discriminate between the strongest candidates
 
 **Still not selecting an architecture, and explicitly not writing an ADR
-this round - C has made real, verified progress, but on a narrower
-front than a full solution.** Three of the four properties Candidate C
-needed to answer are now answered by direct experiment: crash-before-
-ServiceNow, crash-after-ServiceNow-before-completion, and concurrent
-reclaim ownership are all solved by reclaim + target reconciliation,
-independently verified against ServiceNow rather than trusted from
-local state (OB-0021, LL-0016). That is the strongest evidentiary
-position either candidate has been in throughout this investigation.
-What stops an ADR is the fourth property, named and left open on
-purpose: a genuinely concurrent slow-worker race that this project's
-own sequential-process experiments cannot produce or rule out. Choosing
-C today would mean choosing a mechanism verified correct for every
-crash boundary this project has actually reproduced, but still untested
-under real concurrent recovery - a materially better position than
-"undesigned," but not yet "fully verified." Candidate A was
-deliberately not touched this round, per instruction, and remains
-exactly where the prior round left it: one path conclusively closed by
-platform design, the other unexplained after five ruled-out causes
-(FL-0018, OB-0019).
+this round - Candidate C's remaining gap turned out to be more
+fundamental than a missing test, not less.** Four of five properties
+this investigation has checked for Candidate C are now confirmed
+protected by direct experiment, independently verified against
+ServiceNow: concurrent initial processing (OB-0017), crash before the
+external side effect (OB-0021), crash after the external side effect
+(OB-0021), and concurrent reclaim (OB-0021). The fifth - a genuinely
+concurrent slow-original-owner race - was reproduced for real this
+round, with independent processes, and **confirmed unsafe**, not left
+open (OB-0022, 3/3 iterations). That is a materially different outcome
+than "untested": the gap is real, deterministic, and - per this round's
+reasoning (LL-0017) - cannot be closed by tuning the local mechanism
+further. It structurally requires the same kind of target-side
+cooperation Candidate A has spent this entire investigation trying and
+failing to establish. Choosing C today would mean choosing a mechanism
+now known to have one specific, real duplicate-producing gap under
+realistic operating conditions (a worker that is merely slow, not
+dead, is not a contrived scenario). Candidate A was deliberately not
+touched this round, per instruction, and remains exactly where the
+prior round left it: one path conclusively closed by platform design,
+the other unexplained after five ruled-out causes (FL-0018, OB-0019).
 
 **Recommended smallest next experiment - two independent paths, neither
 blocking the other:**
@@ -809,24 +881,27 @@ blocking the other:**
    never results in a persisted `sys_index` record. Still the smallest
    possible action left for Candidate A - outside this project's normal
    engineering loop, so explicitly not something to block on.
-2. **For Candidate C: reproduce the slow-worker race for real, not by
-   reasoning about it** - the same standard this project already holds
-   Candidate A to. Two genuinely concurrent processes, not one
-   sequential script: Worker A's `createIncident` call deliberately
-   delayed after `acquire()` but before it resolves, while Worker B is
-   given enough elapsed time to consider A's record stale, reclaim it,
-   reconcile (finding nothing, since A hasn't completed), and call
-   ServiceNow itself - then let A's original call finally resolve.
-   Independently verify whether the result is 1 Incident (safe) or 2
-   (the predicted duplicate). This is now the single most load-bearing
-   open question for C, narrowed from "does reconciliation work at all"
-   (answered: yes, for the cases tested) to "does it hold under genuine
-   concurrency, not just sequential crash-then-restart."
+2. **For Candidate C: investigate (not implement) whether ServiceNow's
+   Table API supports any conditional-write mechanism usable on
+   `POST`** - a different, narrower question than FL-0018's schema-level
+   `unique_index` investigation. ServiceNow documents `sys_mod_count`-
+   based optimistic concurrency for conditional updates
+   (`PATCH`/`PUT`); whether anything comparable exists or could be
+   adapted for `create` so a stale worker's write can be rejected
+   target-side, based on a fencing/generation value, is unresearched.
+   Local-only fencing was deliberately not pursued as a substitute
+   (LL-0017's reasoning: it can narrow the race's window but not
+   provably close it, and this project's standard has been demonstrated
+   safety, not reduced likelihood). This is now the single most
+   load-bearing open question for C.
 
 Both candidates now have a clear, named, specific blocker rather than a
 vague "needs more investigation" - that is real progress toward an
 eventual ADR, even though this document still stops short of writing
-one.
+one. Notably, both blockers now point at the same underlying capability
+question - what can be enforced on the ServiceNow target itself - even
+though they were reached from two candidates the original spike treated
+as independent alternatives (LL-0017).
 
 ---
 
@@ -840,64 +915,35 @@ that evidence would violate the same discipline this project has applied
 throughout (`CLAUDE.md`: "Do not manufacture alternatives merely to make
 an ADR appear sophisticated").
 
-This round added two artifacts that are investigation tooling, not
-implementation: the custom field `u_gv_business_operation_id` on
-ServiceNow's Incident table (created live in the ServiceNow instance,
-per this round's explicit permission to do so for the experiment - not
-referenced by any runtime code, e.g. `incidentAdapter.ts`), and
-`scripts/test-servicenow-concurrent-idempotency.ts` (a standalone
-experiment script, following this project's existing pattern of
-investigation-only scripts like `detect-unprocessed-events.ts` - not
-wired into the subscriber or any runtime path). The Salesforce
-subscriber (`pubsubClient.ts`, `checkpoint.ts`) was not modified.
+Across the seven follow-up rounds summarized at the top of this
+document, every artifact added has been investigation tooling, never
+implementation, and every one remains true today: **not referenced by
+`src/`, not wired into the subscriber or `incidentAdapter.ts`, and not
+the production implementation of any candidate even if that candidate
+is eventually chosen.** Concretely, this investigation has added, live
+in ServiceNow: the custom field `u_gv_business_operation_id` on
+Incident, and a disposable custom table (`u_gv_index_test`) used to
+isolate FL-0018's index-creation failure from Incident-table specifics
+- both left in place as evidence trail, neither referenced by any
+runtime code. In this repository: `scripts/test-servicenow-concurrent-idempotency.ts`;
+`scripts/lib/idempotencyStore.ts` (the Candidate C prototype - a
+`node:sqlite` file, gitignored, with exactly three functions added
+across the whole investigation: `acquire`, `reclaim`, `markCompleted`,
+plus `getRecord`) and its five experiment scripts
+(`test-durable-state-concurrent-idempotency.ts`,
+`test-durable-state-crash-gap.ts`, `test-durable-state-reclaim-ambiguity.ts`,
+`test-durable-state-reclaim-reconciliation.ts`,
+`test-durable-state-slow-worker-race.ts`, the last of which spawns
+`scripts/lib/slowWorkerA.ts`/`slowWorkerB.ts` as genuinely separate
+processes). The Salesforce subscriber (`pubsubClient.ts`,
+`checkpoint.ts`) has never been modified by this investigation.
 
-A later round added a third: `scripts/lib/idempotencyStore.ts` and its
-two experiment scripts (`test-durable-state-concurrent-idempotency.ts`,
-`test-durable-state-crash-gap.ts`) - an investigation-only prototype of
-Candidate C's atomic create-if-absent mechanism, using `node:sqlite`
-against a local, gitignored `.idempotency-experiment.sqlite` file. Not
-referenced by `src/`, not wired into the subscriber or `incidentAdapter.ts`,
-and not the production implementation of Candidate C even if C is
-eventually chosen - only enough to test whether its core mechanism
-works and what its own failure modes are (OB-0017, OB-0018).
-
-A fourth round (2026-09-16, bounded to Candidate A only, per explicit
-instruction not to touch Candidate C) added one more live-instance
-artifact: a disposable custom table (`u_gv_index_test`, one `String`
-column, `u_test_key`) created specifically to test whether the
-"Database Indexes" wizard's failure was specific to the Incident table
-- not referenced by any runtime code, not deleted afterward (left in
-place as part of this investigation's evidence trail, matching this
-project's existing practice for `u_gv_business_operation_id`). No
-application-level locking, custom business rule, reconciliation worker,
-retry mechanism, or Candidate C reclaim/staleness design was built this
-round, per explicit instruction.
-
-A fifth round (same day, bounded to Candidate C only, per explicit
-instruction to treat Candidate A as blocked and not spend further
-implementation time on it) extended `idempotencyStore.ts` with exactly
-one function, `reclaim()` - an atomic, conditional elapsed-time check,
-not a lease/heartbeat/retry framework - and added
-`scripts/test-durable-state-reclaim-ambiguity.ts`. Still not referenced
-by `src/`, still not wired into the subscriber or `incidentAdapter.ts`,
-still not the production implementation of Candidate C. The
-target-reconciliation mechanism this round's findings point toward
-(LL-0015) was deliberately investigated by reasoning only and **not**
-implemented, per explicit instruction not to build the next mechanism
-unless required to complete the experiment - it wasn't required, since
-the experiment's question (can elapsed time alone make reclamation
-safe?) was already answered without it.
-
-A sixth round (same day, still bounded to Candidate C only) added
-`scripts/test-durable-state-reclaim-reconciliation.ts`, whose
-`reconcileAndComplete` function lives in the script itself, not in
-`idempotencyStore.ts` - the minimum orchestration needed to run this
-specific experiment, explicitly not a generalized recovery worker,
-retry framework, heartbeat system, or production state machine, per
-instruction. No new store function was added; the script reuses
-`acquire`/`reclaim`/`markCompleted`/`getRecord` exactly as they already
-existed. Still not referenced by `src/`, still not wired into the
-subscriber or `incidentAdapter.ts`. The slow-worker race this round
-was explicitly told to analyze but not solve was not built, tested, or
-worked around - it remains open, stated as such rather than quietly
-dropped or papered over (see §6, §7).
+At every step where a fix suggested itself, this investigation
+deliberately stopped short of building it, per each round's explicit
+instruction: no lease/heartbeat/fencing framework, no generalized
+recovery worker, no retry mechanism, no target-side uniqueness
+mechanism, no local-only fencing token proposed as a substitute for
+target-side enforcement. The slow-original-owner race was analyzed,
+reproduced, and confirmed unsafe (OB-0022) - not built around, patched,
+or quietly left unresolved once the tooling existed to actually test
+it.
