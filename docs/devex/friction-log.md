@@ -1427,4 +1427,142 @@ third real use demands it (DP-0003, DP-0007).
 
 ---
 
+### FL-0028: Cron's minimal PATH doesn't just fail to find Node - it can silently find the *wrong* one
+
+**Date:** 2026-09-17
+**Phase:** Phase 1 — Enablement (ADR 0007's next step - operationalizing audit-only scheduling)
+
+#### Observation
+
+Building `scripts/ops/run-scheduled-audit.sh` (the cron-invokable
+wrapper around `npm run detect-unprocessed-events`) and verifying it
+under a simulated cron-like environment (`env -i PATH=/usr/bin:/bin`).
+
+#### Friction
+
+The first version dynamically resolved Node's location at wrapper
+runtime (`command -v node`, falling back to `/usr/bin/node`). Under a
+minimal PATH this did not fail loudly - it silently succeeded, and
+picked up `/usr/bin/node` (a system-installed **Node 18.19.1**), not
+the nvm-managed **Node 22** this project actually requires for
+`node:sqlite`. The result was a confusing failure deep inside
+`idempotencyStore.ts` (`ERR_UNKNOWN_BUILTIN_MODULE: No such built-in
+module: node:sqlite`), not an obvious "node not found" error at the
+point cron would actually hit the problem. A dynamic PATH-based
+resolution is exactly as fragile as the problem it was meant to solve -
+it just guarantees finding *some* `node`, not the *correct* one.
+
+#### Impact
+
+Without directly testing under a stripped-down environment (not just
+reading the wrapper script and assuming it was fine), this would have
+shipped looking correct in every manual test (run from an interactive
+shell with the right `nvm` version already active) and failed
+confusingly the first time cron actually invoked it unattended - the
+exact scenario this round exists to make safe.
+
+#### Possible Enablement
+
+Resolved this round: the wrapper hardcodes the specific nvm Node bin
+directory as an explicit, commented variable, with a note that it must
+be updated (via `nvm which <version>`) if the Node version or machine
+changes. Not solved generically (e.g. sourcing `nvm.sh` in the wrapper)
+- that's more machinery than a single-operator dev deployment needs
+right now; revisit if this project ever runs on more than one machine
+or under a process manager that already solves this.
+
+---
+
+### FL-0029: A `set -e`/`pipefail` bug silently deleted the wrapper's own record of a failed run
+
+**Date:** 2026-09-17
+**Phase:** Phase 1 — Enablement (ADR 0007's next step - operationalizing audit-only scheduling)
+
+#### Observation
+
+Exercising a genuine ServiceNow auth failure (a deliberately invalid
+credential passed to one invocation only) to verify ADR 0007 §8's
+failure-observability requirement.
+
+#### Friction
+
+The wrapper's first version extracted the audit script's `RUN_SUMMARY:`
+line with `grep -o ... | sed ... | tail -n1`. On a failed run, no such
+line exists, so `grep` finds nothing and exits 1 - which, combined with
+`set -o pipefail` and `set -e`, silently terminated the *wrapper script
+itself* right at that line, before it ever reached the code that
+appends a JSON record to `.audit-runs.jsonl`. The wrapper's exit code
+still correctly reflected the underlying failure (by coincidence -
+grep's own exit code happened to also be 1), which made this very easy
+to miss: the wrapper *looked* like it correctly reported the failure,
+but the structured log - the actual mechanism this round exists to
+build - simply had no entry for that run at all.
+
+#### Impact
+
+This would have produced a real, silent gap in exactly the evidence
+ADR 0007 requires (a durable record of every run, success or failure).
+Caught only because the failure condition was actually exercised end to
+end and the log file was checked afterward, not because the script was
+read carefully enough to spot it - `grep` returning 1 for "no match" is
+easy to forget is also "failure" under `set -e`.
+
+#### Impact addendum (why this matters beyond this one script)
+
+Any future wrapper/orchestration script in this project that uses
+`grep`, `test -z`, or similar "did I find something" idioms under
+`set -e`/`pipefail` should assume the same trap applies, not just this
+one line.
+
+#### Possible Enablement
+
+Fixed this round (`|| true` on the affected assignment). No broader
+defensive-scripting convention adopted yet - revisit if a third script
+of this kind hits the same class of bug.
+
+---
+
+### FL-0030: Adding a testable export to a CLI script silently re-ran the whole script on import
+
+**Date:** 2026-09-17
+**Phase:** Phase 1 — Enablement (ADR 0007's next step - operationalizing audit-only scheduling)
+
+#### Observation
+
+Trying to verify `checkSweepHealth()` (the zero-event anomaly guard,
+exported specifically so it could be checked directly rather than via a
+live Salesforce zero-event sweep that can't be safely produced) by
+importing it from a small verification snippet.
+
+#### Friction
+
+`detect-unprocessed-events.ts` calls `main()` unconditionally at the
+bottom of the file. Importing *anything* from the file - even a single
+pure function added specifically to make testing safer - executes that
+unconditional call as an import-time side effect, triggering a full
+real Salesforce sweep and ServiceNow classification pass. The first
+attempt at "safely verify this in isolation" instead performed an
+unplanned, real, live audit run (harmless here since audit-only, but
+not what was intended, and would not be harmless for a script that
+mutated anything).
+
+#### Impact
+
+A few minutes of confusion and one unintended live run before the cause
+was clear. The deeper point: exporting something from a script file for
+testability is not free unless the file also guards its own
+"run when executed directly" behavior - otherwise the act of making
+something testable introduces exactly the side effect testing is
+supposed to avoid.
+
+#### Possible Enablement
+
+Fixed this round with the standard `if (require.main === module)`
+guard around the `main().catch(...)` call - a two-line, idiomatic fix,
+not a refactor. Worth treating as a default habit going forward: any
+script file in this project that exports something for direct testing
+should have this guard, not just this one.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

@@ -29,6 +29,8 @@ npm-debug.log*
 .idempotency-experiment.sqlite-journal
 .idempotency.sqlite
 .idempotency.sqlite-journal
+.audit-runs.jsonl
+.audit-run.lock
 
 # NOTE: add further language/tool-specific ignores (e.g. target/,
 # .terraform/) as more services/tooling are introduced.

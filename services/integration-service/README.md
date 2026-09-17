@@ -367,15 +367,43 @@ growing-responsibility concern. The recommended next step is scheduling
 immediately, at zero mutation risk, and doubles as how this project
 would gather the evidence scheduled recovery still needs.
 
+**That step is done: Tier 1's mandatory detection can now run
+unattended, non-mutating, and observable**
+(`docs/devex/observations.md` OB-0030). `scripts/ops/run-scheduled-audit.sh`
+is a cron + `flock` wrapper - existing OS mechanisms, no new
+dependency - that runs `detect-unprocessed-events.ts` with **no
+arguments, ever**; `--recover` cannot appear, hardcoded, not passed
+through. The script itself gained two small additions:
+`checkSweepHealth()` (exported for direct verification) exits before
+classification or recovery if a sweep returns zero events (ADR 0007
+§4/FL-0026); a `RUN_SUMMARY:` JSON line plus per-`GAP` `ageMs`/
+`localDwellMs` fields give structured, non-mutating evidence for future
+cadence/threshold decisions (from timestamps that already existed - no
+new state added). Verified repeatedly against real systems:
+non-mutation (local store and ServiceNow's total Incident count
+byte-identical across ~7 runs, a skip, and a failure), skip-if-running
+(a genuinely concurrent second invocation exits immediately via
+`flock`), and a real failure (an invalid credential fails loudly, and a
+subsequent run right after succeeds cleanly - no internal retry). Two
+bugs were found only by testing the actual failure/import paths, not by
+reading the code, and fixed: a minimal cron-like PATH silently
+resolving the wrong, too-old Node instead of failing to find one
+(FL-0028); a `set -e`/`pipefail` interaction silently dropping the
+wrapper's own failure log entry (FL-0029); an unguarded `main()`
+triggering a real live run on import (FL-0030). The crontab entry
+itself was not installed - that remains a deliberate, standing decision
+for a human, documented but not automated.
+
 **Still not wired in — deliberately:**
 
-- Any scheduler, for audit or recovery - ADR 0007 defines what one
-  would have to do; none has been built yet.
+- The crontab entry itself - the wrapper is proven correct by direct
+  invocation; scheduling it is a standing system change left for the
+  operator to make deliberately.
+- Any scheduler for **recovery** - ADR 0007 defines what one would have
+  to do; none has been built.
 - A configuration mechanism for `staleAfterMs` (it remains a
-  CLI-supplied value, appropriate only for manually-supervised runs per
-  ADR 0007).
-- The audit tool (`detect-unprocessed-events.ts`) on any automatic
-  schedule - still on-demand only.
+  CLI-supplied value, appropriate only for manually-supervised recovery
+  runs per ADR 0007).
 - Genuine multi-instance concurrency testing at the real entry point -
   `src/salesforce/checkpoint.ts` assumes a single running instance, so
   concurrency has been tested via direct calls to the real functions

@@ -189,11 +189,37 @@ at zero mutation risk, and is how this project would gather the
 evidence scheduled recovery still needs. Nothing was implemented this
 round - no scheduler, no configuration mechanism, no code change at all.
 
+**ADR 0007's recommended next step is now done: Tier 1's mandatory
+detection can run unattended, non-mutating, and observable.**
+`scripts/ops/run-scheduled-audit.sh` is a cron + `flock` wrapper -
+existing OS mechanisms, no new dependency - that runs
+`detect-unprocessed-events.ts` with **no arguments, ever**; `--recover`
+cannot appear. The script gained two small additions: `checkSweepHealth()`
+(ADR 0007 §4/FL-0026) exits before classification or recovery if a
+sweep returns zero events; a `RUN_SUMMARY:` JSON line and per-`GAP`
+`ageMs`/`localDwellMs` fields give structured, non-mutating evidence for
+future cadence/threshold decisions, using only timestamps that already
+existed. Verified against real Salesforce/ServiceNow, repeatedly:
+non-mutation (local store and ServiceNow Incident count byte-identical
+across ~7 runs, one skip, one failure), skip-if-running (a second
+concurrent invocation exits immediately, `flock`-gated), and a genuine
+failure (a bad credential fails loudly, exit 1, and a subsequent run
+succeeds cleanly right after - no internal retry, no lingering bad
+state). **Two real bugs were found only by testing failure/import paths
+directly, not by reading the code** (FL-0028: a minimal cron-like PATH
+silently resolved the wrong, too-old Node rather than failing to find
+one; FL-0029: a `set -e`/`pipefail` interaction silently dropped the
+wrapper's own failure logging; FL-0030: exporting a function for direct
+testing triggered a real live run via an unguarded top-level `main()`
+call) - all three fixed this round. The crontab entry itself was
+**not** installed - a standing, persistent scheduling change is left for
+a deliberate human decision; the exact line is documented for that.
+
 Also proposed but deliberately not built: giving the audit tool its own
 incremental "last audited position" so repeat runs don't always re-sweep
-from `EARLIEST` (LL-0011). Not yet built: any scheduler (for audit or
-recovery), a configuration mechanism for `staleAfterMs`, any Tier 2
-investigation, and tests. See
+from `EARLIEST` (LL-0011). Not yet built: scheduled recovery, a
+configuration mechanism for `staleAfterMs`, any Tier 2 investigation,
+and tests. See
 `services/integration-service/README.md` for current status and
 `docs/devex/dojo-perspectives.md` for what these Enablement rounds
 looked like from each DevEx Dojo role.
@@ -215,6 +241,7 @@ Commands (from `services/integration-service/`):
     npm run test-recovery-payload-source          # investigate where recovery should source its payload from (OB-0027)
     npm run detect-unprocessed-events -- --recover=<ms> # audit + recover GAPs manually, in one run (ADR 0006, OB-0028)
     npm run test-audit-recovery-composition       # verify the audit+recovery composition end-to-end (OB-0028)
+    ./scripts/ops/run-scheduled-audit.sh          # cron-invokable audit-only wrapper (ADR 0007, OB-0030) - not scheduled by default
 
 There is no lint or test tooling yet — do not invent commands for either.
 No other services exist yet. When more are added, or lint/test tooling is

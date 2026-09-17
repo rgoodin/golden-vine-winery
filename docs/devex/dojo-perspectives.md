@@ -520,6 +520,89 @@ happened to build it. This is the clearest single moment so far where
 the project is visibly building the *Path*, not just the integration
 the Path is supposed to generalize from.
 
+### DP-0025: Every real bug this round hid behind "looks right when I run it myself"
+
+**Date:** 2026-09-17
+**Phase:** Phase 1 — Enablement (ADR 0007's next step - operationalizing audit-only scheduling)
+**Perspective:** Developer
+
+All three bugs found this round (FL-0028, FL-0029, FL-0030) share one
+shape: the code was correct-looking, ran successfully every time it was
+tested from an ordinary interactive shell, and broke specifically under
+conditions a developer's own terminal never reproduces - a stripped
+cron-style PATH, a failure path nobody had actually triggered yet, an
+import nobody had actually attempted yet. None of these would have been
+caught by re-reading the diff carefully. All three were caught by
+deliberately creating the exact adverse condition (`env -i PATH=...`,
+a real bad credential, a real import) and checking what actually
+happened. The habit worth keeping: when a task says "make this run
+unattended," the thing to distrust isn't the logic - it's every
+assumption about the environment the logic quietly depends on, and the
+only way to find those assumptions is to remove them one at a time and
+watch it fail.
+
+### DP-0026: "Does the scheduler fire the command" and "does the command behave correctly once unattended" are different questions - conflating them is where this would have shipped broken
+
+**Date:** 2026-09-17
+**Phase:** Phase 1 — Enablement (ADR 0007's next step - operationalizing audit-only scheduling)
+**Perspective:** Dojo Instructor
+
+A shallower version of this round would have written the crontab line,
+run it once by hand, seen a clean successful audit, and called it done
+- that's testing scheduler *syntax*. All three bugs this round found
+(FL-0028-FL-0030) are invisible to that test, because a manual run from
+a developer's shell never has cron's minimal PATH, never happens to hit
+a live credential failure, and never imports the script as a module.
+The teaching point for whoever picks up scheduling work next in this
+project: proving a scheduled job "works" requires simulating the
+specific ways unattended execution differs from supervised execution -
+a stripped environment, a forced failure, a subsequent recovery - not
+just confirming the happy path fires on a timer. This round is now the
+concrete example to point to when that distinction needs explaining
+again.
+
+### DP-0027: Reusing an existing OS mechanism didn't just avoid a new dependency - it made rigorous testing possible for free
+
+**Date:** 2026-09-17
+**Phase:** Phase 1 — Enablement (ADR 0007's next step - operationalizing audit-only scheduling)
+**Perspective:** Platform Engineer
+
+Choosing cron + `flock` over an embedded scheduling library meant the
+"scheduled job" is just a shell script invoked externally - which is
+exactly what let `env -i PATH=/usr/bin:/bin` reproduce cron's real
+environment precisely enough to catch FL-0028 before it ever reached a
+real crontab. An in-process scheduler (e.g. a library running inside
+the long-lived subscriber) would have inherited the developer's full
+environment always, and that specific class of bug would have stayed
+invisible until it broke in production. Smallest-appropriate-mechanism
+isn't only about avoiding a new dependency - here it also happened to
+be the more testable choice, which is worth remembering the next time
+"introduce a proper scheduler framework" looks tempting for its own
+sake.
+
+### DP-0028: Tier 1's mandatory floor just became an actual operable capability, not only a proven one - and the project still declined to flip the last switch itself
+
+**Date:** 2026-09-17
+**Phase:** Phase 1 — Enablement (ADR 0007's next step - operationalizing audit-only scheduling)
+**Perspective:** Dojo Director
+
+ADR 0005 named detection mandatory eight rounds ago. OB-0028 proved the
+mechanism. This round is the first time detection has actually been
+made *safe to run without a person present* - unattended, non-mutating,
+observable, and shown to fail loudly rather than corrupt anything
+quietly. That's a real threshold crossed: Tier 1's baseline guarantee
+has gone from "true if someone remembers to run the audit tool" to
+"true on a schedule, verified end to end, including what happens when
+it breaks." And yet the crontab entry itself was deliberately not
+installed - the wrapper was proven correct by invoking it exactly as
+cron would, without taking the standing, persistent action of actually
+scheduling it, leaving that one decision for a human to make
+deliberately. That restraint, at the very last step of an otherwise
+complete implementation, is itself evidence of the same discipline
+DP-0024 named last round: building the capability and handing over the
+decision to use it are not the same act, and this project keeps
+treating them as separate on purpose.
+
 ---
 
 <!-- Add new entries above this line, most recent first. -->

@@ -1601,4 +1601,102 @@ script, no change to any of the mechanisms OB-0028 verified.
 
 ---
 
+### OB-0030: Tier 1's mandatory detection can run unattended, non-mutating, and observable — ADR 0007's audit-only contract operationalized, two real bugs found by testing the failure paths, not by reading code
+
+**Date:** 2026-09-17
+**Phase:** Phase 1 — Enablement (ADR 0007's recommended next step)
+**Category:** implementation / verification
+
+Answers ADR 0007's recommended next step directly: can Tier 1's
+mandatory detection run unattended, produce useful evidence, and fail
+observably, without ever touching ServiceNow? **Yes, confirmed against
+real Salesforce and ServiceNow, repeatedly, including under a genuine
+failure.**
+
+**Scheduling mechanism: cron + `flock`, an existing OS mechanism, not a
+new framework.** `scripts/ops/run-scheduled-audit.sh` is the
+cron-invokable wrapper; it runs `npm run detect-unprocessed-events`
+with **no arguments, ever** - `--recover` cannot appear, hardcoded, not
+passed through from any caller-supplied argument. `detect-unprocessed-events.ts`
+itself gained two small, additive changes: `checkSweepHealth()` (ADR
+0007 §4 / FL-0026) treats a zero-event sweep as an unhealthy run and
+exits before classification or recovery can run at all; a single
+`RUN_SUMMARY:` JSON line at the end of a successful run reports mode,
+timing, and classification counts. Per-`GAP` lines also report `ageMs`
+(from the event's own `CreatedDate`) and, when a local durable record
+exists, `localDwellMs` (from `idempotencyStore.ts`'s existing
+`acquiredAt`) - non-mutating evidence for the cadence/threshold
+decisions ADR 0007 deferred, using only timestamps that already existed
+(no new state added anywhere).
+
+**Non-mutation, established independently, not assumed:** the local
+`.idempotency.sqlite` store's row count (13) and full contents were
+byte-identical before and after every one of this round's real,
+unattended audit runs; ServiceNow's total Incident count (112) was
+identical before and after. Across roughly seven successful runs, one
+skipped run, and one deliberate failure, **zero Incidents were created
+or modified and zero local durable records changed.**
+
+**Overlap:** two wrapper invocations fired concurrently - the first
+completed a real ~20-second audit; the second, started 2 seconds later,
+exited immediately (`exitCode=75`, `status=skipped`) via `flock -n`,
+logged distinctly in `.audit-runs.jsonl`. No double Salesforce sweep, no
+double ServiceNow query pass.
+
+**Failure:** a deliberately invalid `SERVICENOW_CLIENT_SECRET` (passed
+as a one-off environment override, never touching the real `.env`)
+produced a genuine ServiceNow OAuth failure partway through
+classification. The run failed loudly (`exitCode=1`), and a subsequent
+normal invocation immediately afterward succeeded cleanly - no lock
+left held, no internal retry attempted, exactly ADR 0007 §8's contract.
+
+**The zero-event anomaly guard was verified directly, not by fabricating
+a live Salesforce zero-event sweep** (not safely producible - retention
+is still unestablished per ADR 0006, and forcing it would either risk
+real data loss or require inventing a scenario this project can't
+actually distinguish from a genuine anomaly). `checkSweepHealth(0)` and
+`checkSweepHealth(20)` were called directly and confirmed to branch
+correctly - an honest, narrower verification than a live-fired scenario,
+reported as exactly that.
+
+**Two real implementation bugs were found only by exercising the actual
+failure/import paths, not by reading the code (FL-0028, FL-0029,
+FL-0030):**
+
+- The wrapper's first version dynamically resolved `node` via
+  `command -v`, which under a simulated cron-minimal PATH
+  (`env -i PATH=/usr/bin:/bin`) silently found the *wrong* Node (system
+  Node 18, no `node:sqlite` support) rather than failing to find one -
+  confirmed by directly reproducing the exact failure
+  (`ERR_UNKNOWN_BUILTIN_MODULE`) before fixing it with an explicit,
+  hardcoded, commented path (FL-0028).
+- The wrapper's `RUN_SUMMARY:` extraction used `grep -o ... | tail -n1`
+  under `set -e`/`pipefail`; on a failed run (no such line exists),
+  `grep`'s own "no match" exit code silently terminated the *wrapper*
+  before it could log the failure - found only by actually exercising a
+  failure and checking the log came back empty (FL-0029).
+- Adding `checkSweepHealth` as an export triggered an unplanned real
+  Salesforce/ServiceNow run, because `detect-unprocessed-events.ts`
+  called `main()` unconditionally at import time - fixed with the
+  standard `require.main === module` guard (FL-0030).
+
+**Provisional cadence:** none chosen or hardcoded anywhere. The
+cron schedule field itself is the configuration point - documented in
+the wrapper's own usage comment as an explicitly labeled, editable
+example for the evidence-gathering period, not a recommendation.
+`staleAfterMs`/scheduled recovery remain entirely untouched, per ADR
+0007's scope for this step.
+
+**What this round did not build, per its explicit scope:** scheduled
+recovery, automatic GAP remediation, a production `staleAfterMs`,
+heartbeat/fencing, Tier 2, an incremental replay position, automatic
+`DUPLICATE` remediation, and no broad refactor of
+`detect-unprocessed-events.ts` (two additive checks and one guard, not
+a restructuring). The crontab entry itself was not installed as a
+standing, persistent system change - the wrapper was verified by direct
+invocation (exactly as cron would invoke it), with the exact crontab
+line documented for the operator to add deliberately.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

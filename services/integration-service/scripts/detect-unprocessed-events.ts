@@ -3,6 +3,7 @@ import { config } from '../src/config';
 import { authenticate } from '../src/servicenow/auth';
 import { toCanonicalEvent } from '../src/salesforce/subscriber';
 import { recoverStaleDistributorOnboardingOperation } from '../src/recoverStaleDistributorOnboardingOperation';
+import { getOperation } from '../src/reliability/idempotencyStore';
 
 /**
  * Audit instrument (Phase 3 - not promoted to the Golden Path), extended
@@ -68,6 +69,27 @@ import { recoverStaleDistributorOnboardingOperation } from '../src/recoverStaleD
  * completed locally despite ServiceNow showing nothing) is reported as
  * NOT RECOVERED and remains GAP - never silently treated as resolved,
  * per ADR 0006.
+ *
+ * UNATTENDED/SCHEDULED EXECUTION (ADR 0007, Enablement): this script has
+ * no scheduler of its own and never invents one - it exits 0 on success,
+ * non-zero on failure, exactly the interface an external scheduler
+ * (cron, via `scripts/ops/run-scheduled-audit.sh`) needs and nothing
+ * more. Two additions make an unattended run's outcome legible after
+ * the fact, without a human watching it live:
+ *
+ * - `checkSweepHealth()` (exported for direct verification) treats a
+ *   zero-event sweep as a FAILED/unhealthy run, not a confirming "no
+ *   GAPs" result (ADR 0007 §4, FL-0026) - it exits 2 before
+ *   classification or recovery ever run, so a zero-event sweep cannot
+ *   reach the recovery branch regardless of `--recover`.
+ * - A single `RUN_SUMMARY:` JSON line is printed at the end of a
+ *   successful run - structured evidence for choosing cadence/staleness
+ *   policy later from real observations (ADR 0007 §1/§2), not a
+ *   logging/observability platform. Per-GAP lines also report `ageMs`
+ *   (from the event's own `CreatedDate`, always available) and, when a
+ *   local durable record exists, `localDwellMs` (from
+ *   `idempotencyStore.ts`'s existing `acquiredAt` - no new state added
+ *   anywhere to produce this).
  */
 interface IncidentMatch {
   number: string;
@@ -92,6 +114,27 @@ async function findIncidentsForCorrelationId(correlationId: string): Promise<Inc
 }
 
 type Classification = 'UNEVALUABLE' | 'GAP' | 'OK' | 'DUPLICATE';
+
+/**
+ * ADR 0007 §4 / FL-0026: a sweep returning zero events is not evidence
+ * that nothing needs auditing - it must be treated as an unhealthy run,
+ * not a confirming result. Exported so this exact check can be verified
+ * directly (with a synthetic count) rather than only by inspection -
+ * this project does not have a safe way to force a genuine zero-event
+ * sweep against live Salesforce history, so the check itself, not a
+ * live-fired scenario, is what gets tested.
+ */
+export function checkSweepHealth(eventCount: number): { healthy: boolean; reason?: string } {
+  if (eventCount === 0) {
+    return {
+      healthy: false,
+      reason:
+        'sweep returned 0 events - per ADR 0007 §4 this is treated as an unhealthy/failed run, ' +
+        'not evidence that there are no GAPs (see FL-0026)',
+    };
+  }
+  return { healthy: true };
+}
 
 interface ParsedArgs {
   from: string;
@@ -119,6 +162,7 @@ function parseArgs(argv: string[]): ParsedArgs {
 }
 
 async function main() {
+  const startedAt = new Date();
   const { from, recover, staleAfterMs } = parseArgs(process.argv.slice(2));
 
   if (recover && (staleAfterMs === null || Number.isNaN(staleAfterMs) || staleAfterMs <= 0)) {
@@ -143,6 +187,13 @@ async function main() {
   );
   const events = await replayRange(config.salesforce.pubsubTopic, from);
   console.log(`Collected ${events.length} event(s) from Salesforce.\n`);
+
+  const health = checkSweepHealth(events.length);
+  if (!health.healthy) {
+    console.error(`ANOMALY - ${health.reason}. Not proceeding to classification or recovery.`);
+    process.exit(2);
+    return;
+  }
 
   const tally: Record<Classification, number> = { UNEVALUABLE: 0, GAP: 0, OK: 0, DUPLICATE: 0 };
   let recoveredCount = 0;
@@ -171,9 +222,24 @@ async function main() {
       incidents.length > 0
         ? ` incidents=[${incidents.map((i) => i.number).join(', ')}] count=${incidents.length}`
         : '';
+
+    // Non-mutating age evidence for future cadence/staleness policy
+    // (ADR 0007 §1/§2) - both values come from timestamps that already
+    // exist; nothing new is persisted anywhere to produce them.
+    let ageEvidence = '';
+    if (classification === 'GAP') {
+      const createdDate = event.payload.CreatedDate as number | undefined;
+      const ageMs = createdDate ? Date.now() - createdDate : undefined;
+      const localRecord = getOperation(correlationId);
+      const localDwellMs = localRecord ? Date.now() - new Date(localRecord.acquiredAt).getTime() : undefined;
+      ageEvidence =
+        (ageMs !== undefined ? ` ageMs=${ageMs}` : '') +
+        (localDwellMs !== undefined ? ` localDwellMs=${localDwellMs} localStatus=${localRecord!.status}` : '');
+    }
+
     console.log(
       `${classification.padEnd(12)} - correlationId=${correlationId} ` +
-        `distributor="${distributorName}" replayId=${replayId}${evidence}`
+        `distributor="${distributorName}" replayId=${replayId}${evidence}${ageEvidence}`
     );
 
     // Recovery is attempted for GAP only, and only in --recover mode. This
@@ -207,9 +273,29 @@ async function main() {
   if (recover) {
     console.log(`Recovery: ${recoveredCount} recovered, ${notRecoveredCount} GAP(s) not recovered this run.`);
   }
+
+  const finishedAt = new Date();
+  const runSummary = {
+    mode: recover ? 'audit+recover' : 'audit',
+    from,
+    startedAt: startedAt.toISOString(),
+    finishedAt: finishedAt.toISOString(),
+    durationMs: finishedAt.getTime() - startedAt.getTime(),
+    eventsExamined: events.length,
+    classifications: tally,
+    recovery: recover ? { recovered: recoveredCount, notRecovered: notRecoveredCount } : null,
+    success: true,
+  };
+  console.log(`RUN_SUMMARY: ${JSON.stringify(runSummary)}`);
 }
 
-main().catch((err) => {
-  console.error(err.message ?? err);
-  process.exit(1);
-});
+// Guards against `main()` running as a side effect of importing this
+// file elsewhere - `checkSweepHealth` is exported for direct
+// verification (see this file's header comment), and importing it
+// should not also trigger a real Salesforce/ServiceNow run.
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(err.message ?? err);
+    process.exit(1);
+  });
+}

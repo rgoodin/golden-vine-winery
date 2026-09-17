@@ -144,6 +144,16 @@ detection only, which is mandatory under Tier 1 already and carries no
 mutation risk - and is how the evidence for scheduling recovery would
 actually get gathered.
 
+That step is now built and verified. A small cron + `flock` wrapper
+runs the audit tool unattended, non-mutating, and observable - proven
+against real Salesforce and ServiceNow across repeated runs, a skipped
+overlapping run, and a genuine failure (which fails loudly and recovers
+cleanly on the next run, with no internal retry). Two real bugs
+surfaced only by testing those exact conditions, not by reading the
+code, and were fixed. The crontab entry itself hasn't been installed -
+that's a deliberate, standing decision left for a human to make, not
+something automated on its own.
+
 See [`CLAUDE.md`](./CLAUDE.md) ("Current Repository State") for the
 up-to-date summary,
 [`docs/decisions/0005-external-side-effect-reliability-contract.md`](./docs/decisions/0005-external-side-effect-reliability-contract.md)
