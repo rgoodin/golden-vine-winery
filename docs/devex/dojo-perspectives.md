@@ -603,6 +603,85 @@ DP-0024 named last round: building the capability and handing over the
 decision to use it are not the same act, and this project keeps
 treating them as separate on purpose.
 
+### DP-0029: The first real firing was uneventful, which is the entire point of the previous round's rigor
+
+**Date:** 2026-09-17
+**Phase:** Phase 1 — Enablement (ADR 0007's evidence-gathering period begins)
+**Perspective:** Developer
+
+The first genuinely cron-triggered run produced no surprises at all -
+same duration profile, same classification counts, same non-mutation
+guarantee as every manually-invoked test before it. That's not
+anticlimactic, it's confirmation: OB-0030's rigor (a simulated minimal
+PATH, a forced credential failure, a real concurrent invocation) already
+exercised the specific ways unattended execution differs from
+supervised execution, so there was nothing left for the real cron
+environment to expose. A boring first production run is what "tested
+the operational behavior, not just the syntax" is supposed to buy - it
+would have been a bad sign if this round had found something new.
+
+### DP-0030: "Verified to behave like cron would run it" and "cron actually ran it" are different claims, and only one of them was available before this round
+
+**Date:** 2026-09-17
+**Phase:** Phase 1 — Enablement (ADR 0007's evidence-gathering period begins)
+**Perspective:** Dojo Instructor
+
+It would have been easy to treat OB-0030's simulated-environment testing
+as sufficient and simply assert the schedule "works" once installed.
+Instead this round insisted on independent confirmation from a source
+this project's own code cannot influence or fabricate - cron's own
+daemon log (`journalctl -u cron`, `/var/log/syslog`) - before treating
+the installed schedule as proven, not just plausible. The teaching
+point: a wrapper script behaving correctly when you invoke it yourself,
+however carefully you simulate the conditions, is still a claim about
+what *would* happen - only an external, independently-readable record
+of an unprompted execution converts that into a claim about what *did*
+happen. That distinction is worth holding onto for the next operational
+claim this project makes, not just this one.
+
+### DP-0031: Three plain files were enough - the discipline was in not reaching for more, not in building less
+
+**Date:** 2026-09-17
+**Phase:** Phase 1 — Enablement (ADR 0007's evidence-gathering period begins)
+**Perspective:** Platform Engineer
+
+Retaining per-run evidence for later cadence/threshold analysis could
+have justified a real observability stack - a time-series database, a
+dashboard, a log-shipping pipeline. None of that was needed: an
+append-only JSONL file, a cumulative raw log, and a latest-run log cover
+every requirement this round actually had, and are exactly as easy to
+analyze later (`jq` over `.audit-runs.jsonl`) as anything heavier would
+be at this data volume. The platform-engineering judgment here wasn't
+technical - it was resisting the pull toward infrastructure that would
+have been premature for a single hourly job with one human consumer,
+consistent with this project's standing practice of not building for a
+scale or an audience that doesn't exist yet.
+
+### DP-0032: This is the first Tier 1 mechanism to cross from "capability" to "operation" - proven once is not the same as running now
+
+**Date:** 2026-09-17
+**Phase:** Phase 1 — Enablement (ADR 0007's evidence-gathering period begins)
+**Perspective:** Dojo Director
+
+Every previous round in this reliability arc produced a *capability*:
+something verified to work when invoked. This round produced something
+categorically different - a standing process, running on its own, right
+now, whether or not anyone is watching, independent of any human
+choosing to trigger it today. That's a real threshold for a Golden Path
+to cross, not a bigger version of the same kind of milestone: a
+capability is proven by an experiment that ends; an operation is a
+commitment that continues, and has to be documented, disableable, and
+legible to someone who wasn't there when it was decided (this round's
+"Operating the scheduled audit" section exists for exactly that
+reader). The project still declined to conflate this with a bigger
+decision - the cadence is explicitly labeled provisional, recovery
+scheduling is explicitly not decided, and the whole point of this
+standing job is to produce the evidence a later, separate round will
+need. Enablement has now produced not just working code but a running
+system, and the discipline is in treating those as different
+achievements rather than assuming the second follows automatically from
+the first.
+
 ---
 
 <!-- Add new entries above this line, most recent first. -->

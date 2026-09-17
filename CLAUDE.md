@@ -212,14 +212,24 @@ one; FL-0029: a `set -e`/`pipefail` interaction silently dropped the
 wrapper's own failure logging; FL-0030: exporting a function for direct
 testing triggered a real live run via an unguarded top-level `main()`
 call) - all three fixed this round. The crontab entry itself was
-**not** installed - a standing, persistent scheduling change is left for
-a deliberate human decision; the exact line is documented for that.
+**not** installed that round - a standing, persistent scheduling change
+was explicitly left for a deliberate human decision.
+
+**That decision has since been made: audit-only is installed and
+running hourly** (OB-0031), on the user's explicit instruction, as
+ADR 0007's provisional evidence-gathering cadence - not a chosen Tier 1
+audit SLA, not recovery policy. `crontab -l` confirms it; a reference
+copy lives at `scripts/ops/crontab-hourly-audit.txt`. See
+`services/integration-service/README.md`'s "Operating the scheduled
+audit" section for where results land, how to tell success from
+failure, what exit 75 means, and how to disable it.
 
 Also proposed but deliberately not built: giving the audit tool its own
 incremental "last audited position" so repeat runs don't always re-sweep
-from `EARLIEST` (LL-0011). Not yet built: scheduled recovery, a
-configuration mechanism for `staleAfterMs`, any Tier 2 investigation,
-and tests. See
+from `EARLIEST` (LL-0011). Not yet built/decided: scheduled recovery
+(blocked on cadence/`staleAfterMs` evidence this hourly job exists to
+gather), a configuration mechanism for `staleAfterMs`, any Tier 2
+investigation, and tests. See
 `services/integration-service/README.md` for current status and
 `docs/devex/dojo-perspectives.md` for what these Enablement rounds
 looked like from each DevEx Dojo role.

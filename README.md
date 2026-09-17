@@ -150,9 +150,13 @@ against real Salesforce and ServiceNow across repeated runs, a skipped
 overlapping run, and a genuine failure (which fails loudly and recovers
 cleanly on the next run, with no internal retry). Two real bugs
 surfaced only by testing those exact conditions, not by reading the
-code, and were fixed. The crontab entry itself hasn't been installed -
-that's a deliberate, standing decision left for a human to make, not
-something automated on its own.
+code, and were fixed.
+
+That standing decision has since been made deliberately: audit-only now
+runs hourly on a real, installed schedule - an explicitly provisional
+evidence-gathering cadence, not a chosen Tier 1 audit SLA or a recovery
+policy. Scheduled recovery remains a separate, later decision, gated on
+cadence and staleness evidence this hourly job exists to accumulate.
 
 See [`CLAUDE.md`](./CLAUDE.md) ("Current Repository State") for the
 up-to-date summary,

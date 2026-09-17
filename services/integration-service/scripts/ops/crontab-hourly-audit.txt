@@ -1,0 +1,24 @@
+# Golden Vine Winery integration-service - Tier 1 audit-only scheduling
+#
+# PROVISIONAL evidence-gathering cadence per ADR 0007
+# (docs/decisions/0007-tier1-scheduled-recovery-operational-contract.md),
+# installed 2026-09-17. This hourly cadence is NOT a chosen Tier 1 audit
+# SLA and NOT recovery policy - it exists only to accumulate real
+# classification/timing/age evidence toward the cadence and staleAfterMs
+# decisions ADR 0007 deferred. Revisit once that evidence exists.
+#
+# Runs audit-only. Never supplies --recover. See
+# services/integration-service/scripts/ops/run-scheduled-audit.sh and
+# services/integration-service/README.md ("Operating the scheduled
+# audit") for what this does, where its output goes, and how to disable
+# it.
+#
+# This file is a checked-in REFERENCE COPY of what's installed on the
+# development machine's crontab - it is documentation, not something
+# applied automatically. To (re)install it verbatim:
+#   crontab services/integration-service/scripts/ops/crontab-hourly-audit.txt
+# To view what's actually running: crontab -l
+#
+# The absolute paths below are specific to the machine this was
+# installed on - update them if this moves.
+0 * * * * /home/rgoodin/IdeaProjects/golden-vine-winery/services/integration-service/scripts/ops/run-scheduled-audit.sh >> /home/rgoodin/IdeaProjects/golden-vine-winery/services/integration-service/.audit-cron.log 2>&1

@@ -1699,4 +1699,85 @@ line documented for the operator to add deliberately.
 
 ---
 
+### OB-0031: Audit-only installed as a standing hourly job, on explicit instruction — first genuine cron-triggered execution independently confirmed
+
+**Date:** 2026-09-17
+**Phase:** Phase 1 — Enablement (ADR 0007's evidence-gathering period)
+**Category:** implementation / verification / operations
+
+OB-0030 proved the audit-only wrapper correct by direct invocation, but
+deliberately did not install a standing crontab entry - a persistent,
+system-level change requiring an explicit human decision, not something
+to take unilaterally. That decision was made explicitly this round:
+install `0 * * * *` (hourly) as ADR 0007's provisional evidence-gathering
+cadence - not a chosen Tier 1 audit SLA, not recovery policy.
+
+**Installation confirmed via the actual installed configuration, not
+just the repository example:** `crontab -l` was read back after
+installing and shows exactly the intended entry; `systemctl is-active
+cron` / `journalctl -u cron` confirm the cron daemon itself is active
+(running since the prior day, PID 1007). A reference copy of the
+installed crontab lives at `scripts/ops/crontab-hourly-audit.txt` -
+documentation of what's running, not something applied automatically.
+
+**The first genuine, cron-triggered execution was independently
+confirmed from three separate sources, not just the wrapper's own
+self-report:**
+
+- `/var/log/syslog` and `journalctl -u cron`: `CRON[453155]: (rgoodin)
+  CMD (.../run-scheduled-audit.sh ...)` fired at `07:00:01`, PAM
+  session closed at `07:00:30` - cron's own daemon log, external to
+  anything this project's code writes.
+- `.audit-cron.log`: the real captured stdout/stderr from that exact
+  invocation.
+- `.audit-runs.jsonl`: `{"wrapperStartedAt":"2026-09-17T14:00:01.844Z",
+  ...,"status":"ok","exitCode":0,"scriptRunSummary":{"mode":"audit",
+  ...,"eventsExamined":20,"classifications":{"UNEVALUABLE":1,"GAP":3,
+  "OK":12,"DUPLICATE":4},"recovery":null,"success":true}}` - a
+  ~29-second run, structurally identical to every manually-invoked run
+  in OB-0030, this time triggered by nobody.
+
+This is explicitly distinguished from every prior test: OB-0030's
+verification ran the wrapper directly, exactly as cron *would*; this is
+the first time cron actually did, unprompted, at the literal scheduled
+time, confirmed by a log this project's own code has no ability to
+fabricate. The schedule was not accelerated to manufacture additional
+observations, and none are claimed beyond this single, genuine
+execution - inferring cadence or threshold policy from one data point
+would be exactly the mistake ADR 0007 exists to prevent.
+
+**Non-mutation held under real unattended execution, not just
+simulated/manual testing:** the local durable store's row count (13)
+and ServiceNow's total Incident count (112) were identical immediately
+after this cron-triggered run, matching every prior measurement in
+OB-0030.
+
+**Evidence retention:** three plain files under
+`services/integration-service/` (`.audit-runs.jsonl` structured,
+`.audit-cron.log` raw/cumulative, `.audit-last-run.log` raw/latest-only),
+all gitignored. No monitoring stack, metrics platform, database, or
+dashboard was introduced - explicitly out of scope, and unnecessary for
+an evidence-gathering period whose entire consumer, for now, is a human
+periodically reading a log file.
+
+**Operator documentation added**
+(`services/integration-service/README.md`, "Operating the scheduled
+audit"): where the schedule lives, where results land, how to
+distinguish `ok`/`skipped`/`sweep_anomaly`/`failed`, what exit 75
+means, how to run the audit manually, how to disable the schedule, and
+why `--recover` is deliberately absent from every scheduled invocation.
+
+**No new operational friction surfaced this round** - installation and
+the first firing both matched OB-0030's verified behavior exactly, with
+no code changes required or made.
+
+**What this round did not do, per its explicit scope:** choose a
+production `staleAfterMs`, schedule recovery, make the recovery-cadence
+decision, or infer any policy from this single observed run. The system
+is left running at the hourly observation cadence; the next decision
+point is whichever round chooses to analyze accumulated
+`.audit-runs.jsonl` evidence, not this one.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

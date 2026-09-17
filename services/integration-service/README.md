@@ -390,17 +390,19 @@ reading the code, and fixed: a minimal cron-like PATH silently
 resolving the wrong, too-old Node instead of failing to find one
 (FL-0028); a `set -e`/`pipefail` interaction silently dropping the
 wrapper's own failure log entry (FL-0029); an unguarded `main()`
-triggering a real live run on import (FL-0030). The crontab entry
-itself was not installed - that remains a deliberate, standing decision
-for a human, documented but not automated.
+triggering a real live run on import (FL-0030).
+
+**Audit-only is now actually installed and running hourly, as a
+provisional evidence-gathering cadence** (`docs/devex/observations.md`
+OB-0031) - not a chosen Tier 1 audit SLA, not recovery policy. See
+"Operating the scheduled audit" below for what it does, where its
+output lands, and how to turn it off.
 
 **Still not wired in — deliberately:**
 
-- The crontab entry itself - the wrapper is proven correct by direct
-  invocation; scheduling it is a standing system change left for the
-  operator to make deliberately.
-- Any scheduler for **recovery** - ADR 0007 defines what one would have
-  to do; none has been built.
+- Any schedule for **recovery** - only audit-only is installed. ADR
+  0007 defines what scheduling recovery would require; none of that
+  evidence exists yet.
 - A configuration mechanism for `staleAfterMs` (it remains a
   CLI-supplied value, appropriate only for manually-supervised recovery
   runs per ADR 0007).
@@ -424,3 +426,86 @@ for a human, documented but not automated.
 
 These are left out per `CLAUDE.md`'s "smallest useful change" principle —
 they'll be added once friction shows what's actually needed.
+
+## Operating the scheduled audit
+
+Tier 1's mandatory detection (ADR 0005) runs unattended, hourly, on
+this machine, installed 2026-09-17. This section is written so another
+developer or operator can pick this up without archaeology.
+
+**Where the schedule is configured:** the machine's crontab
+(`crontab -l` to view it). A copy of exactly what's installed is
+checked into the repo at
+[`scripts/ops/crontab-hourly-audit.txt`](./scripts/ops/crontab-hourly-audit.txt)
+for reference - that file is documentation, not something applied
+automatically; installing or changing the real crontab is always a
+deliberate, separate step (`crontab scripts/ops/crontab-hourly-audit.txt`
+to (re)install it verbatim).
+
+**The cadence is `0 * * * *` (top of every hour) and is explicitly
+provisional** - evidence-gathering for ADR 0007's still-open cadence
+decision, not a chosen Tier 1 audit SLA. Don't read "it runs hourly" as
+"hourly is correct"; read it as "hourly is what we're currently
+observing under."
+
+**Where audit results are recorded**, all under
+`services/integration-service/`, all gitignored (operational data, not
+source):
+
+- `.audit-runs.jsonl` - one structured JSON line per invocation
+  attempt, including skipped ones. This is the file to analyze across
+  runs (timestamps, duration, classification counts, per-run
+  success/failure, overlap). Append-only; safe to `tail -f` while a run
+  is in progress.
+- `.audit-cron.log` - raw stdout/stderr from every cron-invoked run,
+  appended over time (cron's own redirect target in the crontab entry).
+- `.audit-last-run.log` - the *most recent* run's raw output only,
+  overwritten each time (what the wrapper itself writes before parsing
+  it) - useful for "what just happened," not history.
+- `.audit-run.lock` - the `flock` lock file. Empty; its presence is
+  normal, not a sign anything is stuck.
+
+No monitoring stack, metrics platform, or database was introduced to
+hold this - three plain files are the smallest mechanism consistent
+with what's already built, and are sufficient for the evidence-gathering
+period ADR 0007 describes.
+
+**How to tell success from failure:** read the `status` field of the
+most recent line(s) in `.audit-runs.jsonl`:
+
+| `status` | Meaning |
+|---|---|
+| `"ok"` | Audit completed normally. Check `scriptRunSummary.classifications` for the actual GAP/OK/DUPLICATE/UNEVALUABLE counts - `"ok"` says the *run* succeeded, not that zero GAPs exist. |
+| `"skipped"` | A previous run was still in progress; this invocation did nothing (see exit code 75 below). Not a failure. |
+| `"sweep_anomaly"` | The Salesforce sweep returned zero events (ADR 0007 §4 / FL-0026) - treated as an unhealthy run, not "nothing to audit." Worth a look if it recurs. |
+| `"failed"` | Something threw - a Salesforce or ServiceNow auth/query error, most likely. `scriptRunSummary` will be `null` since the script didn't reach its own summary line; check `.audit-last-run.log` for the actual error. |
+
+**What exit code 75 means:** this specific invocation found a previous
+run's `flock` still held and skipped itself immediately, by design
+(ADR 0007 §3) - not an error. It exists so overlapping scheduled runs
+don't pile up Salesforce/ServiceNow API calls; a real duplicate-recovery
+risk is already prevented at the reclaim level regardless (see the
+"Reliability" section above), so this is a load/observability
+safeguard, not a correctness one.
+
+**How to run the audit manually** (does not require or interact with
+the schedule):
+
+    npm run detect-unprocessed-events              # exactly what the schedule runs
+    ./scripts/ops/run-scheduled-audit.sh            # the same thing, through the wrapper (also updates the log files above)
+
+**How to disable the schedule:** `crontab -e` and delete the block
+between (and including) the `# Golden Vine Winery integration-service`
+comment header and the `0 * * * *` line, then save. (`crontab -r` would
+also remove it, but wipes the *entire* crontab for this user - only use
+that if you're certain nothing else is scheduled.) Disabling the
+schedule does not touch any of the log files above or anything ADR
+0005/0006/0007 established - it only stops future runs.
+
+**Why `--recover` is deliberately absent:** the schedule runs detection
+only. Scheduling recovery is a distinct, larger decision ADR 0007
+requires real cadence and `staleAfterMs` evidence for - evidence this
+hourly audit-only cadence exists specifically to start accumulating.
+`scripts/ops/run-scheduled-audit.sh` hardcodes the absence of
+`--recover`; there is no flag, environment variable, or configuration
+path that adds it.
