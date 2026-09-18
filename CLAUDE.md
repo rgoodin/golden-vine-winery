@@ -347,6 +347,21 @@ upgraded production function — 0/3 duplicates, same result as before,
 now through the actual code path rather than the diagnostic scripts
 used to establish it. See `docs/devex/observations.md` OB-0035.
 
+**Minimal CI/CD is now live on GitHub Actions** (`.github/workflows/ci.yml`) -
+scoped to exactly what exists: `npm install` → `npm run build`
+(root-level, all workspaces) → `npm test` → `npm audit --audit-level=high`.
+No lint stage (no lint tooling exists yet - not invented as a side
+effect of this work) and no deploy/integration/promotion stages (no
+deployment target exists anywhere in this project - every service runs
+locally). Needs no secrets: typecheck, build, and the real test suite
+never touch live credentials, and the manual
+`test-production-*`/`test-durable-state-*`/investigation scripts stay
+exactly as manual as they've always been, never folded into CI. Root
+`package.json` gained a `build` script (there was previously no
+single root-level way to build every workspace) and an `"engines":
+{"node": ">=22"}` field, documenting the real `node:sqlite` constraint
+at install time, not just in one package's README.
+
 A Salesforce Developer Edition org (External Client App, JWT Bearer Flow)
 and a ServiceNow Developer Instance (Client Credentials grant, dedicated
 `itil`-role user) have been set up for testing; credentials live in
@@ -923,12 +938,15 @@ not a violation to correct.
 
 Do not create the entire repository structure prematurely.
 
-Current structure (as of the Phase 5 Second Consumer exercise):
+Current structure (as of the minimal CI/CD addition):
 
     .
     ├── package.json           # npm workspace root
     ├── CLAUDE.md
     ├── README.md
+    ├── .github/
+    │   └── workflows/
+    │       └── ci.yml         # build + test + dependency audit - no lint/deploy stages yet
     ├── docs/
     │   ├── architecture/
     │   ├── devex/
@@ -946,9 +964,7 @@ A further-future structure may still add:
 
     ├── schemas/
     ├── tests/
-    ├── infrastructure/
-    └── .github/
-        └── workflows/
+    └── infrastructure/
 
 Each addition to `packages/` should follow the same discipline that
 produced the first two: extracted because a real, evidenced need showed

@@ -1,5 +1,7 @@
 # Golden Vine Winery
 
+[![CI](https://github.com/rgoodin/golden-vine-winery/actions/workflows/ci.yml/badge.svg)](https://github.com/rgoodin/golden-vine-winery/actions/workflows/ci.yml)
+
 An enterprise integration engineering and Developer Experience (DevEx)
 case study.
 
@@ -66,6 +68,9 @@ correlation IDs, testing, CI/CD, IaC, etc.) are documented in
 ├── package.json                  # npm workspace root (packages/* + services/*)
 ├── CLAUDE.md                     # Project charter, philosophy, phases, and constraints
 ├── README.md                     # This file
+├── .github/
+│   └── workflows/
+│       └── ci.yml                 # build + test + dependency audit, no lint/deploy stages yet
 ├── docs/
 │   ├── architecture/              # Architecture spikes (investigation, not yet a decision)
 │   ├── decisions/                 # Architecture Decision Records (ADRs)

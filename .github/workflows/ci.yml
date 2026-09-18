@@ -1,0 +1,30 @@
+name: CI
+
+# Proportionate to what actually exists in this repository - see
+# CLAUDE.md's "CI/CD Philosophy" and the plan behind this workflow.
+# No lint stage (no lint tooling introduced yet), no deploy/integration
+# stages (no deployment target exists anywhere in this project). Needs
+# no secrets - typecheck, build, and the real test suite never touch
+# live Salesforce/ServiceNow/SharePoint credentials. The manual
+# test-production-*/test-durable-state-*/investigation scripts, which
+# DO need real credentials, are deliberately never run here.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm install
+      - run: npm run build --workspaces --if-present
+      - run: npm test
+      - run: npm audit --audit-level=high

@@ -2,7 +2,11 @@
   "name": "golden-vine-winery",
   "private": true,
   "description": "Golden Vine Winery - enterprise integration engineering and DevEx case study",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
+    "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present"
   },
   "workspaces": [
