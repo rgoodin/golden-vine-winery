@@ -1,5 +1,14 @@
 # 0009. SharePoint workspace-folder creation achieves evidence-backed exactly-once behavior
 
+> **Follow-up resolved (2026-09-18):** this ADR's Consequences section
+> flagged, but explicitly did not decide, whether this finding justified
+> simplifying `recoverStaleDocumentWorkspaceOperation()`. That question
+> was reviewed and approved as its own small, explicitly-scoped change -
+> see `docs/devex/observations.md` OB-0035 for what changed and how it
+> was re-verified through the real orchestration function under the
+> genuine slow-owner race. This ADR's own text is left unmodified below;
+> OB-0035 is the record of the follow-up decision.
+
 ## Context
 
 ADR 0005 adopted, for the Salesforce → ServiceNow integration, a

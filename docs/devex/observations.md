@@ -1950,4 +1950,54 @@ business data worth preserving.
 
 ---
 
+### OB-0035: Recovery reordered to lean on SharePoint's proven atomicity instead of a pre-check that no longer does safety work — re-verified through the real orchestration function under the genuine race
+
+**Date:** 2026-09-18
+**Phase:** Follow-up to ADR 0009 (`docs/architecture/0002-sharepoint-target-side-uniqueness-spike.md`)
+**Category:** implementation / verification
+
+ADR 0009 explicitly flagged, but did not act on, a follow-up question:
+given SharePoint's `conflictBehavior: "fail"` is now proven atomic,
+does `recoverStaleDocumentWorkspaceOperation()`'s inherited
+reconcile-then-create shape (copied from ServiceNow, where a pre-check
+does real protective work because ServiceNow has no atomic uniqueness)
+still make sense? Reviewed and approved as a small, explicitly-scoped
+change, not assumed worth doing automatically just because it was now
+possible.
+
+**Change:** recovery now attempts create directly; only on a real
+`WorkspaceFolderConflictError` (a new, distinct error type added to
+`workspaceAdapter.ts` for the 409/`nameAlreadyExists` case) does it fall
+back to a reconciliation lookup. In the common case (a genuine gap, no
+race), this is one network call instead of two. The normal processing
+path (`processDistributorDocumentWorkspaceRequest.ts`) was deliberately
+left unchanged - only recovery's shape was in scope.
+
+**Re-verified with the same rigor as the original finding, not assumed
+correct from the reasoning alone:**
+
+- `npm run test-production-recovery`'s three cases re-run against the
+  new code. Case 2 (crash after the target call, before local
+  completion) now directly exercises the new conflict-then-lookup
+  branch for real - its own log output shows the
+  `WorkspaceFolderConflictError` being caught and the fallback lookup
+  finding the already-created folder, still correctly reporting
+  `foundExisting: true`. All three cases: PASS.
+- `scripts/lib/slowWorkerB.ts` was upgraded to call
+  `recoverStaleDocumentWorkspaceOperation()` directly rather than
+  hand-rolling its steps (it previously mirrored the ORIGINAL ServiceNow
+  investigation's worker, which predated a callable recovery function
+  and had no choice but to hand-roll them) - a genuine improvement, not
+  just a refactor for this task, since it now tests the real function
+  under the real race rather than a manual stand-in for it.
+- `npm run test-target-side-uniqueness-race` re-run: **0/3 iterations
+  produced a duplicate**, same result as the original finding, now
+  through the actual updated production code path. Worker A's losing
+  attempt correctly surfaces the new `WorkspaceFolderConflictError`.
+
+All folders created during re-verification were independently confirmed
+then deleted - re-verification residue, not business data.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

@@ -9,6 +9,23 @@ export interface WorkspaceFolder {
   webUrl: string;
 }
 
+/**
+ * Thrown when SharePoint rejects a create because a folder with that
+ * exact name already exists (`conflictBehavior: "fail"`, HTTP 409). A
+ * distinct type from a generic failure - per
+ * docs/decisions/0009-sharepoint-folder-creation-uniqueness.md, this is
+ * SharePoint's own atomic uniqueness check doing its job, not an error
+ * condition. recoverStaleDocumentWorkspaceOperation.ts catches this
+ * specifically to know when to fall back to a lookup; anything else
+ * propagates as a genuine failure.
+ */
+export class WorkspaceFolderConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'WorkspaceFolderConflictError';
+  }
+}
+
 const GRAPH_BASE = 'https://graph.microsoft.com/v1.0';
 
 /**
@@ -56,10 +73,13 @@ async function ensureWorkspaceRootFolder(accessToken: string): Promise<void> {
  *
  * Uses "fail" conflict behavior - unlike ServiceNow's unconditional
  * Incident creation, Graph gives a real conflict signal for a
- * duplicate name, surfaced here as an error rather than a silent
- * second success. Callers are expected to have already checked
- * workspaceReconciliation.ts before calling this for a given business
- * operation.
+ * duplicate name, surfaced here as a WorkspaceFolderConflictError
+ * rather than a silent second success. This is proven (ADR 0009) to be
+ * a genuine atomic uniqueness check, not just documentation - callers
+ * may rely on it as the actual safety mechanism rather than needing to
+ * check workspaceReconciliation.ts first (see
+ * recoverStaleDocumentWorkspaceOperation.ts, which deliberately calls
+ * this before reconciliation for exactly that reason).
  */
 export async function createDistributorWorkspaceFolder(
   event: DistributorOnboardingRequestedEvent
@@ -84,9 +104,14 @@ export async function createDistributorWorkspaceFolder(
     }
   );
 
-  const body = (await response.json()) as { id?: string; name?: string; webUrl?: string };
+  const body = (await response.json()) as { id?: string; name?: string; webUrl?: string; error?: { code?: string } };
 
   if (!response.ok) {
+    if (response.status === 409) {
+      throw new WorkspaceFolderConflictError(
+        `SharePoint workspace folder creation conflict (409): ${JSON.stringify(body)}`
+      );
+    }
     throw new Error(`SharePoint workspace folder creation failed (${response.status}): ${JSON.stringify(body)}`);
   }
 

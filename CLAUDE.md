@@ -331,6 +331,22 @@ production code changed as part of this finding; whether it justifies
 simplifying recovery logic is flagged as a real follow-up question, not
 decided here. See `docs/devex/observations.md` OB-0034.
 
+**That follow-up was then reviewed and resolved: recovery now leans on
+the proven guarantee instead of a pre-check that no longer does safety
+work.** `recoverStaleDocumentWorkspaceOperation()` attempts create
+directly and falls back to a reconciliation lookup only on a real
+`WorkspaceFolderConflictError` (a new, distinct error type) — one
+network call instead of two in the common case, and no longer forcing
+this integration's recovery shape to match ServiceNow's for its own
+sake once real evidence justified diverging from it. Re-verified with
+the same rigor as the original finding: all three `test-production-recovery`
+cases pass against the new code (Case 2 directly exercises the new
+conflict-then-lookup branch), and the slow-owner race
+(`test-target-side-uniqueness-race`) was re-run through the real,
+upgraded production function — 0/3 duplicates, same result as before,
+now through the actual code path rather than the diagnostic scripts
+used to establish it. See `docs/devex/observations.md` OB-0035.
+
 A Salesforce Developer Edition org (External Client App, JWT Bearer Flow)
 and a ServiceNow Developer Instance (Client Credentials grant, dedicated
 `itil`-role user) have been set up for testing; credentials live in

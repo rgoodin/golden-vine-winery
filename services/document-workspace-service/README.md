@@ -126,6 +126,15 @@ narrowly to exactly this action — see the ADR for what it does and
 doesn't generalize to, and don't assume it extends to any other
 SharePoint/Graph operation without its own evidence.
 
+`recoverStaleDocumentWorkspaceOperation()` was subsequently updated to
+actually lean on this: it attempts create directly and only falls back
+to a reconciliation lookup on a real `WorkspaceFolderConflictError`,
+rather than checking first the way the ServiceNow integration's
+recovery does (a shape that made sense there because ServiceNow has no
+equivalent atomic guarantee). Re-verified through the real orchestration
+function under the genuine slow-owner race — see
+`docs/devex/observations.md` OB-0035.
+
 ## Audit / scheduled detection
 
 `scripts/detect-unprocessed-events.ts` is the SharePoint counterpart to

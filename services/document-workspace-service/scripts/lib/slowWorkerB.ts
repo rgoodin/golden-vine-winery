@@ -1,6 +1,4 @@
-import { reclaimOperation, completeOperation } from 'golden-path-reliability';
-import { createDistributorWorkspaceFolder } from '../../src/sharepoint/workspaceAdapter';
-import { findDistributorWorkspaceFolder } from '../../src/sharepoint/workspaceReconciliation';
+import { recoverStaleDocumentWorkspaceOperation } from '../../src/recoverStaleDocumentWorkspaceOperation';
 import { DistributorOnboardingRequestedEvent } from '../../src/types/events';
 
 /**
@@ -8,17 +6,16 @@ import { DistributorOnboardingRequestedEvent } from '../../src/types/events';
  * (docs/architecture/0002-sharepoint-target-side-uniqueness-spike.md).
  * Runs as a genuinely separate OS process, started while Worker A is
  * still alive and working - not simulating a crash, waiting for Worker
- * A's record to become stale by elapsed time, then reclaiming and
- * reconciling exactly as the real production
- * recoverStaleDocumentWorkspaceOperation() does (split into its
- * constituent calls here so this script controls the exact timing).
+ * A's record to become stale by elapsed time, then calling the real
+ * production recovery function directly
+ * (recoverStaleDocumentWorkspaceOperation) - not a manual
+ * reimplementation of its steps, per
+ * docs/devex/phase-2-observation-review.md Finding 7. This is what
+ * actually re-verifies the create-first recovery shape
+ * (docs/devex/observations.md OB-0035) under the genuine race, not a
+ * stand-in for it.
  *
  * CLI args: <correlationId> <distributorName> <staleAfterMs> <waitBeforeReclaimMs>
- *
- * Deliberately does NOT check whether Worker A is still alive before
- * reclaiming - elapsed time is the only signal the production
- * mechanism has, and this experiment tests that mechanism as it
- * actually exists, not a hypothetical improved version of it.
  */
 async function main() {
   const [correlationId, distributorName, staleAfterMsArg, waitBeforeReclaimMsArg] = process.argv.slice(2);
@@ -32,13 +29,6 @@ async function main() {
 
   console.log(`WORKER_B_WAITING:${JSON.stringify({ waitBeforeReclaimMs })}`);
   await new Promise((resolve) => setTimeout(resolve, waitBeforeReclaimMs));
-
-  const reclaimed = reclaimOperation(correlationId, staleAfterMs);
-  console.log(`WORKER_B_RECLAIM:${JSON.stringify({ reclaimed, at: new Date().toISOString() })}`);
-  if (!reclaimed) {
-    console.log('WORKER_B_STOPPED:reclaim did not succeed');
-    return;
-  }
 
   const event: DistributorOnboardingRequestedEvent = {
     eventType: 'DistributorOnboardingRequested',
@@ -58,20 +48,22 @@ async function main() {
     },
   };
 
-  const existing = await findDistributorWorkspaceFolder(event);
-  console.log(`WORKER_B_RECONCILE:${JSON.stringify({ foundExisting: existing !== null, existing })}`);
-
-  if (existing) {
-    completeOperation(correlationId, existing.id, existing.name);
-    console.log(`WORKER_B_COMPLETED_FROM_RECONCILE:${JSON.stringify(existing)}`);
-    return;
-  }
-
   try {
-    const folder = await createDistributorWorkspaceFolder(event);
-    console.log(`WORKER_B_SHAREPOINT_RESULT:${JSON.stringify(folder)}`);
-    completeOperation(correlationId, folder.id, folder.name);
-    console.log(`WORKER_B_COMPLETED:${JSON.stringify({ completedAt: new Date().toISOString() })}`);
+    const result = await recoverStaleDocumentWorkspaceOperation(event, staleAfterMs);
+
+    console.log(`WORKER_B_RECLAIM:${JSON.stringify({ reclaimed: result.reclaimed, at: new Date().toISOString() })}`);
+    if (!result.reclaimed) {
+      console.log('WORKER_B_STOPPED:reclaim did not succeed');
+      return;
+    }
+
+    console.log(`WORKER_B_RECONCILE:${JSON.stringify({ foundExisting: result.foundExisting, existing: result.folder ?? null })}`);
+    if (result.foundExisting) {
+      console.log(`WORKER_B_COMPLETED_FROM_RECONCILE:${JSON.stringify(result.folder)}`);
+    } else {
+      console.log(`WORKER_B_SHAREPOINT_RESULT:${JSON.stringify(result.folder)}`);
+      console.log(`WORKER_B_COMPLETED:${JSON.stringify({ completedAt: new Date().toISOString() })}`);
+    }
   } catch (err: any) {
     console.log(`WORKER_B_SHAREPOINT_ERROR:${JSON.stringify({ message: err.message })}`);
     process.exit(1);
