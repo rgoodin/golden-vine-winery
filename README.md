@@ -219,6 +219,19 @@ exactly-once target-side behavior - a genuinely stronger, narrower claim
 than either integration could make before, earned by direct experiment
 rather than assumed from Microsoft's documentation.
 
+**Project tooling has since caught up to match the codebase**: hosting
+migrated to GitHub (full history preserved), minimal CI/CD went live on
+GitHub Actions (build, test, dependency audit - deliberately no
+deploy/integration stages, since no deployment target exists anywhere
+in this project), and lint tooling (ESLint + typescript-eslint) was
+added and wired into that same pipeline. Infrastructure as Code was
+scoped last and concluded, on real evidence, with no tooling adopted -
+see [ADR 0010](./docs/decisions/0010-infrastructure-as-code-scope.md):
+no real infrastructure exists to point Terraform at, and every
+integration-configuration candidate (Salesforce, ServiceNow, and
+SharePoint auth setup alike) independently reached the same "keep this
+manual" conclusion on its own merits.
+
 See [`CLAUDE.md`](./CLAUDE.md) ("Current Repository State") for the
 up-to-date summary,
 [`docs/decisions/0005-external-side-effect-reliability-contract.md`](./docs/decisions/0005-external-side-effect-reliability-contract.md)

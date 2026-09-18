@@ -448,6 +448,18 @@ of six unexplained ones), three `catch (err: any)` blocks properly
 fixed to `catch (err)` with `err instanceof Error` narrowing instead of
 suppressed, and one genuinely dead import removed.
 
+**Infrastructure as Code was scoped next, and concluded with no
+tooling adopted** - see
+[ADR 0010](docs/decisions/0010-infrastructure-as-code-scope.md). No
+real infrastructure exists in this project to point Terraform at; the
+one plausible candidate (the Azure AD app registration) directly
+conflicts with FL-0033's own "revisit after more iterations" call from
+earlier in this same session. This is now the fourth independent case
+(Salesforce, ServiceNow, SharePoint auth, SharePoint's bootstrap step)
+where "keep this manual" was the evidence-backed conclusion for
+integration configuration - itself real signal, not four isolated
+non-decisions.
+
 # Golden Vine Integration Golden Path
 
 ## Project Purpose
@@ -1161,6 +1173,14 @@ Document the distinction between:
 - infrastructure
 - application configuration
 - integration configuration
+
+> **Note (2026-09-18):** that distinction is now documented, with real
+> examples from this project, in
+> [ADR 0010](docs/decisions/0010-infrastructure-as-code-scope.md) -
+> which also records the decision not to adopt any IaC tooling yet
+> (no real infrastructure exists to point it at; every integration
+> configuration candidate independently reached "keep this manual" on
+> its own evidence) and the concrete trigger for revisiting.
 
 
 # GitHub
