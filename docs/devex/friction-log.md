@@ -1381,6 +1381,24 @@ N events, 0 were GAPs" - rather than trusted on a single run, especially
 once something (a person or a future scheduler) is expected to act on
 its output without a human re-running it to sanity-check.
 
+#### Update, 2026-09-18: no longer a single occurrence
+
+ADR 0007's `checkSweepHealth()` guard (built the round after this entry
+was written) has now caught this exact condition twice under **real,
+unattended, cron-triggered execution** - `.audit-cron.log` shows two
+separate `ANOMALY - sweep returned 0 events` runs, each followed within
+the hour by a normal, successful sweep (20-21 events). This is real
+operational frequency data this project didn't have before: the
+cold-start artifact recurs under genuine hourly operation, not just on
+a process's very first invocation in a session. It has not yet caused
+any actual harm - the guard has correctly prevented both occurrences
+from being misread as "no GAPs" or (had `--recover` ever been
+scheduled) from silently skipping a recovery attempt. Still not enough
+evidence to change anything (per ADR 0007's own "when to revisit" -
+this is the *same* anomaly shape recurring, not a *different* one), but
+worth having the real frequency on record rather than treating the
+original occurrence as a one-off.
+
 ---
 
 ### FL-0027: The audit script now owns sweep, classify, map-to-canonical, and recover - worth watching, not yet worth splitting
