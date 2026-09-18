@@ -1899,4 +1899,55 @@ same way it was for ServiceNow (OB-0031).
 
 ---
 
+### OB-0034: SharePoint closed the exact race ServiceNow never could — a genuinely stronger reliability claim, earned by direct experiment
+
+**Date:** 2026-09-18
+**Phase:** Architecture investigation (`docs/architecture/0002-sharepoint-target-side-uniqueness-spike.md`, ADR 0009)
+**Category:** implementation / verification
+
+Following Developer #2's exercise and the Phase 6 review, an open
+question was pursued directly rather than assumed: does SharePoint's
+`conflictBehavior: "fail"` actually provide the target-side uniqueness
+enforcement ServiceNow was directly tested for and never demonstrated
+(the original architecture spike, ADR 0005)?
+
+**Round 1** (`scripts/test-concurrent-create-race.ts`, 5 iterations):
+two genuinely independent OS processes racing to create an identically-named
+folder, with `golden-path-reliability` not involved at all. **5/5
+iterations produced exactly one success and one real, independently
+verified `409 nameAlreadyExists` conflict.** No duplicate on any
+iteration; which worker won varied, confirming genuine two-sided
+contention.
+
+**Round 2** (`scripts/test-target-side-uniqueness-race.ts`, 3
+iterations): exact reproduction of OB-0022's slow-owner race structure
+- a genuinely slow-but-alive original owner, and a recovery owner that
+reclaims, reconciles (finding nothing, correctly, because the original
+owner hasn't acted yet), and also attempts to create - through this
+service's real production functions
+(`acquireOperation`/`reclaimOperation`/`completeOperation`,
+`createDistributorWorkspaceFolder`, `findDistributorWorkspaceFolder`),
+unmodified. This exact structure produced a real ServiceNow duplicate
+3/3 times when first investigated. **Against SharePoint: 0/3 iterations
+produced a duplicate** - the original owner's later, delayed create
+attempt failed with a real, independently-verified conflict every time,
+not a timeout or silent no-op.
+
+**Conclusion (ADR 0009):** for this one action - creating a
+deterministically-named child item under `conflictBehavior: "fail"` -
+`document-workspace-service` can honestly claim exactly-once target-side
+behavior, backed by direct evidence, not documentation or reasoning.
+This is narrower but genuinely stronger than what either integration
+could claim before. Explicitly not generalized to SharePoint/Graph as a
+whole, and no production code (reliability, reconciliation, recovery)
+was changed - whether this finding justifies simplifying recovery logic
+is flagged as a real follow-up question, not decided or acted on this
+round.
+
+All 8 folders these experiments created (5 in Round 1, 3 in Round 2)
+were independently verified then deleted - experiment residue, not
+business data worth preserving.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

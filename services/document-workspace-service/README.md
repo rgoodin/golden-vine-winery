@@ -93,6 +93,8 @@ npm run test-production-concurrent-idempotency # verify the durable-ownership ga
 npm run test-production-recovery              # verify stale-operation recovery via the real recovery function
 npm run detect-unprocessed-events -- --recover=<ms> # audit + recover GAPs manually, in one run
 ./scripts/ops/run-scheduled-audit.sh          # cron-invokable audit-only wrapper - not scheduled by default
+npm run test-concurrent-create-race           # target-side uniqueness spike, Round 1 (see below)
+npm run test-target-side-uniqueness-race      # target-side uniqueness spike, Round 2 (see below)
 ```
 
 ## Testing
@@ -101,11 +103,28 @@ npm run detect-unprocessed-events -- --recover=<ms> # audit + recover GAPs manua
 `services/integration-service`: only pure/local logic is covered here
 (`toCanonicalEvent()`'s field mapping, `folderNameFor()`'s naming and
 sanitization). Anything touching live Salesforce or SharePoint is
-verified manually against real systems — see
-`docs/golden-path/verify.md` for which experiments apply here and
-which are explicitly not re-run (the slow-owner race was already
-proven once against the underlying mechanism; re-deriving it here
-wouldn't teach anything new about SharePoint specifically).
+verified manually against real systems — see `docs/golden-path/verify.md`
+for the curated experiment set most integrations should run, and the
+next section for the one experiment this integration's own target
+specifically called for.
+
+## Target-side uniqueness: a genuinely stronger claim than ServiceNow's
+
+`createDistributorWorkspaceFolder()` creates folders with
+`"@microsoft.graph.conflictBehavior": "fail"` — a real, server-side
+conflict-detection mechanism ServiceNow's Table API never had. This was
+tested directly, not assumed:
+`docs/architecture/0002-sharepoint-target-side-uniqueness-spike.md` /
+[ADR 0009](../../docs/decisions/0009-sharepoint-folder-creation-uniqueness.md)
+reproduced the exact slow-owner race
+(`docs/devex/observations.md` OB-0022) that produced a real ServiceNow
+duplicate 3/3 times — against SharePoint, **0/3 iterations produced a
+duplicate**. For this one action, this service can honestly claim
+evidence-backed exactly-once target-side behavior, not just recoverable
+at-least-once processing plus audit detection. That claim is scoped
+narrowly to exactly this action — see the ADR for what it does and
+doesn't generalize to, and don't assume it extends to any other
+SharePoint/Graph operation without its own evidence.
 
 ## Audit / scheduled detection
 

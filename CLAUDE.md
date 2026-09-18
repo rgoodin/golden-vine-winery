@@ -309,6 +309,28 @@ portfolio project) — recorded honestly as an evidence gap, not assumed
 working. No standing cron schedule was installed for it — a separate,
 deliberate decision, same as it was for ServiceNow (OB-0031).
 
+**A follow-up architecture spike then produced a genuinely significant
+finding: SharePoint closed the exact race ServiceNow never could.**
+`docs/architecture/0002-sharepoint-target-side-uniqueness-spike.md` /
+[ADR 0009](docs/decisions/0009-sharepoint-folder-creation-uniqueness.md)
+directly tested whether `createDistributorWorkspaceFolder()`'s
+`conflictBehavior: "fail"` provides real target-side uniqueness — the
+same property ServiceNow was tested for and never demonstrated (ADR
+0005). Two rounds of live experiments against real SharePoint: a direct
+concurrent-create race (5/5 iterations, no local mechanism involved —
+every race resolved to exactly one success and one real `409
+nameAlreadyExists`), then an exact reproduction of OB-0022's
+slow-owner race (3/3 iterations, through this service's real,
+unmodified production functions) — the identical structure that
+produced a real ServiceNow duplicate 3/3 times when first investigated.
+**0/3 iterations produced a duplicate against SharePoint.** For this one
+action, `document-workspace-service` can now honestly claim
+evidence-backed exactly-once target-side behavior — narrower, but
+genuinely stronger, than either integration could claim before. No
+production code changed as part of this finding; whether it justifies
+simplifying recovery logic is flagged as a real follow-up question, not
+decided here. See `docs/devex/observations.md` OB-0034.
+
 A Salesforce Developer Edition org (External Client App, JWT Bearer Flow)
 and a ServiceNow Developer Instance (Client Credentials grant, dedicated
 `itil`-role user) have been set up for testing; credentials live in

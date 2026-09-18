@@ -199,6 +199,20 @@ for the full evaluation: what transferred as-is, what this target
 forced to be solved fresh (SharePoint has no equivalent of ServiceNow's
 `correlation_id` field), and the real setup friction hit along the way.
 
+**A follow-up architecture spike then found something genuinely
+significant: SharePoint closes the exact concurrency race ServiceNow
+never could.**
+[`docs/architecture/0002-sharepoint-target-side-uniqueness-spike.md`](./docs/architecture/0002-sharepoint-target-side-uniqueness-spike.md) /
+[ADR 0009](./docs/decisions/0009-sharepoint-folder-creation-uniqueness.md)
+reproduced ADR 0005's slow-owner race - the scenario that produced a
+real ServiceNow duplicate 3/3 times - against SharePoint instead, using
+this service's real, unmodified production code. Zero duplicates in
+3/3 iterations, independently verified against the live site. For this
+one action, the SharePoint integration can honestly claim evidence-backed
+exactly-once target-side behavior - a genuinely stronger, narrower claim
+than either integration could make before, earned by direct experiment
+rather than assumed from Microsoft's documentation.
+
 See [`CLAUDE.md`](./CLAUDE.md) ("Current Repository State") for the
 up-to-date summary,
 [`docs/decisions/0005-external-side-effect-reliability-contract.md`](./docs/decisions/0005-external-side-effect-reliability-contract.md)
