@@ -94,6 +94,18 @@ npm run publish-test-event -- "Some Distributor Name"
 npm run verify-recent-incidents -- 5   # or a correlation ID to filter to one event
 ```
 
+## Unit tests
+
+```
+npm test
+```
+
+Fast, local, mock-free (`node:test`) - currently just
+`toCanonicalEvent()`'s field mapping (pure data transformation, no I/O).
+This is deliberately not where reliability/recovery/concurrency claims
+get verified - see "Setup / test scripts" below and
+`docs/golden-path/verify.md` for that.
+
 ## Setup / test scripts
 
 Phase 3 (Enablement) candidate from `docs/devex/lessons-learned.md`

@@ -54,6 +54,20 @@ service that imports this package gets its own store for free, with no
 required configuration. Requires Node 22+ (`node:sqlite` is
 experimental as of this writing).
 
+## Testing
+
+`npm test` (from here, or `npm test` at the repository root, which runs
+every workspace's tests together) - fast, local, mock-free unit tests
+(`node:test`) against a real local SQLite database. Covers this
+package's own documented behavior (acquire/reclaim/complete/get,
+including the "constraint decides, not a prior read" properties). Does
+**not** re-test genuine multi-process concurrency (OB-0017's 5/5
+trials, OB-0022's slow-owner race) - a single-process unit test can't
+exercise real OS-level concurrency. That evidence lives in
+golden-vine-winery's `scripts/test-production-concurrent-idempotency.ts`
+and `scripts/lib/slowWorkerA.ts`/`slowWorkerB.ts`, run against real
+systems - see below.
+
 ## Evidence this behavior is real, not asserted
 
 This package's behavior was established experimentally before

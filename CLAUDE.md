@@ -278,6 +278,7 @@ and a ServiceNow Developer Instance (Client Credentials grant, dedicated
 Commands:
 
     npm install                                   # from the REPOSITORY ROOT - sets up the packages/* workspace symlinks
+    npm test                                      # from the REPOSITORY ROOT - runs every workspace's fast, mock-free unit tests
 
 The rest, from `services/integration-service/`:
 
@@ -292,8 +293,19 @@ The rest, from `services/integration-service/`:
     npm run test-audit-recovery-composition       # verify the audit+recovery composition end-to-end (OB-0028)
     ./scripts/ops/run-scheduled-audit.sh          # cron-invokable audit-only wrapper (ADR 0007, OB-0030) - not scheduled by default
 
-There is no lint or test tooling yet — do not invent commands for either.
-No other services exist yet. When more are added, or lint/test tooling is
+**A first formal test suite now exists** — `node:test` (built-in, zero
+new dependencies), no mocks: only pure, local, no-external-system logic
+is unit-tested (`golden-path-reliability`'s full acquire/reclaim/
+complete/get behavior against a real local SQLite file;
+`golden-path-salesforce-transport`'s checkpoint save/load roundtrip;
+`toCanonicalEvent()`'s field mapping). `npm test` from the repository
+root runs all of it in well under a second. The existing
+`npm run test-production-*`/`test-durable-state-*` scripts remain
+exactly as they were - deliberately manual, live-system verification
+against real Salesforce/ServiceNow, not folded into `npm test` and not
+replaced by it. There is still no lint tooling — do not invent commands
+for that.
+No other services exist yet. When more are added, or lint tooling is
 introduced, update this section with the real commands and architecture
 rather than the aspirational structure sketched later in this file.
 
@@ -947,11 +959,19 @@ Where appropriate, prefer machine-readable contracts such as:
 
 Testing should eventually include:
 
-- unit tests
+- unit tests — **started**: `npm test` (root), `node:test`, mock-free,
+  pure/local logic only (see "Current Repository State" above).
 - schema tests
 - contract tests
-- integration tests
-- failure-path tests
+- integration tests — the existing `npm run test-production-*`/
+  `test-durable-state-*` scripts already serve this role, against real
+  Salesforce/ServiceNow, deliberately not mocked; not yet folded into
+  any single runner or made to run automatically.
+- failure-path tests — several already exist as deliberate, real
+  failure-path experiments (crash boundaries, the slow-owner race,
+  cron failure handling); not yet part of the unit suite, for the same
+  reason integration tests aren't - they require real systems and real
+  time, not something to run on every `npm test`.
 
 Do not rely solely on happy-path testing.
 

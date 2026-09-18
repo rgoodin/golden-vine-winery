@@ -75,6 +75,16 @@ service needs no extra configuration to get its own checkpoint file.
 `replayRange` never touches the checkpoint file at all (read-only
 diagnostic, distinct from `subscribe`'s runtime resume behavior).
 
+## Testing
+
+`npm test` (from here, or at the repository root) runs fast, local,
+mock-free unit tests (`node:test`) for `checkpoint.ts`'s save/load
+roundtrip - pure file I/O, no network, no reason to fake it.
+`auth.ts`/`pubsubClient.ts` genuinely require a live Salesforce org and
+are **not** unit-tested here - see golden-vine-winery's
+`scripts/get-topic-info.ts`, `publish-test-event.ts`, and the
+`test-production-*.ts` scripts for the real, live verification of those.
+
 ## Evidence this behavior is real, not asserted
 
 The checkpoint-resume and replay-diagnostic behavior here was

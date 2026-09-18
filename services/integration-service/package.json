@@ -5,6 +5,7 @@
   "description": "Salesforce -> ServiceNow integration service (Golden Vine Winery)",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "test": "TS_NODE_PROJECT=tsconfig.test.json node --require ts-node/register/transpile-only --test \"test/**/*.test.ts\"",
     "dev": "ts-node src/index.ts",
     "start": "node -r ts-node/register/transpile-only dist/index.js",
     "publish-test-event": "ts-node scripts/publish-test-event.ts",

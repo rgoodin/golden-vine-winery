@@ -5,6 +5,9 @@
   "description": "Salesforce Pub/Sub API transport - auth, gRPC connection, schema resolution, replay/checkpoint (Golden Path Enablement slice)",
   "main": "src/index.ts",
   "types": "src/index.ts",
+  "scripts": {
+    "test": "node --require ts-node/register/transpile-only --test \"test/**/*.test.ts\""
+  },
   "dependencies": {
     "@grpc/grpc-js": "^1.10.9",
     "@grpc/proto-loader": "^0.7.13",
@@ -12,6 +15,9 @@
     "jsonwebtoken": "^9.0.2"
   },
   "devDependencies": {
-    "@types/jsonwebtoken": "^9.0.6"
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/node": "^20.14.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.4"
   }
 }
