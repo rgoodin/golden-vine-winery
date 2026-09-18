@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { authenticate } from '../src/servicenow/auth';
 import { config } from '../src/config';
-import { openStore, acquire, reclaim, markCompleted, getRecord } from './lib/idempotencyStore';
+import { openStore, acquire, reclaim, markCompleted } from './lib/idempotencyStore';
 
 /**
  * Investigation-only follow-up to OB-0020 (staleness-based reclaim is

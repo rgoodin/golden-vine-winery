@@ -62,8 +62,9 @@ async function main() {
     console.log(`WORKER_A_SHAREPOINT_RESULT:${JSON.stringify(folder)}`);
     completeOperation(correlationId, folder.id, folder.name);
     console.log(`WORKER_A_COMPLETED:${JSON.stringify({ completedAt: new Date().toISOString() })}`);
-  } catch (err: any) {
-    console.log(`WORKER_A_SHAREPOINT_ERROR:${JSON.stringify({ message: err.message })}`);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.log(`WORKER_A_SHAREPOINT_ERROR:${JSON.stringify({ message })}`);
     process.exit(1);
   }
 }

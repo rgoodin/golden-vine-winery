@@ -47,8 +47,9 @@ async function main() {
   try {
     const folder = await createDistributorWorkspaceFolder(event);
     console.log(`RACE_WORKER_${role}_SUCCESS:${JSON.stringify({ id: folder.id, name: folder.name })}`);
-  } catch (err: any) {
-    console.log(`RACE_WORKER_${role}_ERROR:${JSON.stringify({ message: err.message })}`);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.log(`RACE_WORKER_${role}_ERROR:${JSON.stringify({ message })}`);
   }
 }
 

@@ -1,3 +1,10 @@
+/* eslint-disable @typescript-eslint/no-explicit-any --
+   The proto is loaded dynamically (no generated TS types - see below),
+   so the gRPC client and its callback responses are untyped throughout
+   this file. This is one deliberate, explained exception to the rest
+   of this codebase's strict typing, not a blanket opt-out - every
+   `any` here traces back to the same root cause: no codegen step for
+   one service's dynamically-loaded proto. */
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import * as path from 'path';

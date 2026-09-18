@@ -14,7 +14,7 @@ interface SqliteDatabase {
   prepare(sql: string): SqliteStatement;
   close(): void;
 }
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const { DatabaseSync } = require('node:sqlite') as { DatabaseSync: new (path: string) => SqliteDatabase };
 
 /**

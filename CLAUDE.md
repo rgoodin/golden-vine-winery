@@ -362,6 +362,12 @@ single root-level way to build every workspace) and an `"engines":
 {"node": ">=22"}` field, documenting the real `node:sqlite` constraint
 at install time, not just in one package's README.
 
+**Lint tooling has since been added and wired into that same CI
+workflow** (ESLint 10 + typescript-eslint, root-level, `npm run lint` -
+see "Commands" below for what it found and how each finding was
+resolved). The paragraph above is left as an accurate record of CI/CD's
+own state at the time it was built, not rewritten now that lint exists.
+
 A Salesforce Developer Edition org (External Client App, JWT Bearer Flow)
 and a ServiceNow Developer Instance (Client Credentials grant, dedicated
 `itil`-role user) have been set up for testing; credentials live in
@@ -401,8 +407,9 @@ root runs all of it in well under a second. The existing
 `npm run test-production-*`/`test-durable-state-*` scripts remain
 exactly as they were - deliberately manual, live-system verification
 against real Salesforce/ServiceNow, not folded into `npm test` and not
-replaced by it. There is still no lint tooling — do not invent commands
-for that. The same suite exists for `services/document-workspace-service/`
+replaced by it. Lint tooling now exists (ESLint 10 + typescript-eslint,
+root-level `eslint.config.js`, `npm run lint` from the repository root) -
+see below. The same suite exists for `services/document-workspace-service/`
 (`toCanonicalEvent()`'s mapping, `folderNameFor()`'s naming/sanitization) -
 `npm test` from the repository root runs both services' suites together.
 
@@ -417,9 +424,29 @@ reuses `integration-service`'s, to exercise real Salesforce Pub/Sub
 broadcast semantics across two independent services rather than
 duplicate a script.
 
-If lint tooling is introduced, update this section with the real
-commands and architecture rather than the aspirational structure
-sketched later in this file.
+**Lint tooling: `npm run lint` (root) runs ESLint across the whole
+workspace tree** (`eslint.config.js`, flat config,
+`tseslint.configs.recommended` - not the stricter type-aware variants,
+proportionate to a project running a linter for the first time). No
+Prettier - a formatter solves a different problem than a linter, and
+the existing codebase already has one consistent style throughout;
+introducing one now would either agree with it or force a large,
+non-functional reformat with no demonstrated need. Root-level only,
+not duplicated per package/service, unlike `typescript`/`ts-node`
+(which packages genuinely need locally at runtime) - ESLint is a
+dev-time-only tool, the standard setup for a monorepo. Wired into CI
+(`.github/workflows/ci.yml`) as the first step after `npm install`, per
+`CLAUDE.md`'s own CI/CD Philosophy stage order. The first real run
+surfaced 15 genuine findings, not invented ones: two stale
+`eslint-disable` comments referencing a renamed rule
+(`@typescript-eslint/no-var-requires` → `no-require-imports`, both in
+the `node:sqlite` dynamic-require workaround this package and the
+original prototype it was extracted from both use), six legitimate
+`any` usages in `pubsubClient.ts`'s dynamically-loaded, ungenerated
+gRPC proto client (now one clear, explained file-level disable instead
+of six unexplained ones), three `catch (err: any)` blocks properly
+fixed to `catch (err)` with `err instanceof Error` narrowing instead of
+suppressed, and one genuinely dead import removed.
 
 # Golden Vine Integration Golden Path
 
@@ -938,15 +965,16 @@ not a violation to correct.
 
 Do not create the entire repository structure prematurely.
 
-Current structure (as of the minimal CI/CD addition):
+Current structure (as of adding lint tooling):
 
     .
     ├── package.json           # npm workspace root
     ├── CLAUDE.md
     ├── README.md
+    ├── eslint.config.js       # ESLint 10 + typescript-eslint, flat config
     ├── .github/
     │   └── workflows/
-    │       └── ci.yml         # build + test + dependency audit - no lint/deploy stages yet
+    │       └── ci.yml         # lint + build + test + dependency audit - no deploy stages yet
     ├── docs/
     │   ├── architecture/
     │   ├── devex/

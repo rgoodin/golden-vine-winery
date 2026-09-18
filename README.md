@@ -68,9 +68,10 @@ correlation IDs, testing, CI/CD, IaC, etc.) are documented in
 ├── package.json                  # npm workspace root (packages/* + services/*)
 ├── CLAUDE.md                     # Project charter, philosophy, phases, and constraints
 ├── README.md                     # This file
+├── eslint.config.js               # ESLint 10 + typescript-eslint, flat config
 ├── .github/
 │   └── workflows/
-│       └── ci.yml                 # build + test + dependency audit, no lint/deploy stages yet
+│       └── ci.yml                 # lint + build + test + dependency audit, no deploy stages yet
 ├── docs/
 │   ├── architecture/              # Architecture spikes (investigation, not yet a decision)
 │   ├── decisions/                 # Architecture Decision Records (ADRs)
