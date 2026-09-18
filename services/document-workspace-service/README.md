@@ -85,10 +85,14 @@ Then, from this directory:
 ## Commands
 
 ```
-npm run dev      # run the subscriber (creates SharePoint workspace folders)
-npm run build    # compile to dist/
-npm start        # run compiled output
-npm test         # fast, local, mock-free unit tests
+npm run dev                                   # run the subscriber (creates SharePoint workspace folders)
+npm run build                                 # compile to dist/
+npm start                                     # run compiled output
+npm test                                      # fast, local, mock-free unit tests
+npm run test-production-concurrent-idempotency # verify the durable-ownership gate via the real processing function
+npm run test-production-recovery              # verify stale-operation recovery via the real recovery function
+npm run detect-unprocessed-events -- --recover=<ms> # audit + recover GAPs manually, in one run
+./scripts/ops/run-scheduled-audit.sh          # cron-invokable audit-only wrapper - not scheduled by default
 ```
 
 ## Testing
@@ -103,11 +107,28 @@ which are explicitly not re-run (the slow-owner race was already
 proven once against the underlying mechanism; re-deriving it here
 wouldn't teach anything new about SharePoint specifically).
 
-## Explicitly not built this round
+## Audit / scheduled detection
 
-Scheduled/cron audit detection (`services/integration-service`'s
-`detect-unprocessed-events` equivalent) does not exist for this
-service — real infrastructure that isn't needed to test whether the
-Golden Path packages transfer, the actual point of this exercise. See
-`docs/devex/friction-log.md` and `docs/devex/observations.md` for what
-this exercise did and didn't surface.
+`scripts/detect-unprocessed-events.ts` is the SharePoint counterpart to
+`services/integration-service`'s audit tool — same two-mode shape
+(audit-only, opt-in `--recover=<ms>`) and classification model
+(`GAP`/`OK`/`DUPLICATE`/`UNEVALUABLE`), built per
+`docs/devex/phase-6-iteration-review.md` Finding 4 (a deliberate
+exception to "don't anticipate friction" — this is a repetition of
+already-validated capability, not speculation).
+
+The actual reconciliation mechanism underneath is genuinely different
+from ServiceNow's, not a mechanical port: ServiceNow has an indexed
+`correlation_id` field, so its audit queries once per event. SharePoint
+doesn't, so `listWorkspaceFolders()`
+(`src/sharepoint/workspaceReconciliation.ts`) lists the target's actual
+state **once per run**, and every event is classified against that
+single in-memory snapshot — see that function's own comment, and
+`docs/devex/observations.md` OB-0033 for how every classification
+branch (including a manufactured `DUPLICATE` and the empty-site/404
+path) was verified live, not assumed from the port.
+
+`scripts/ops/run-scheduled-audit.sh` is a cron-invokable wrapper,
+verified by direct invocation. No standing cron schedule is installed
+for it — that remains a separate, deliberate decision, the same way it
+was for `services/integration-service` (OB-0031).

@@ -1830,4 +1830,73 @@ integration logic.
 
 ---
 
+### OB-0033: SharePoint's audit tool needed a genuinely different solution shape than ServiceNow's - list-once-per-run, not query-once-per-event - and every branch was verified live, not assumed from the port
+
+**Date:** 2026-09-18
+**Phase:** Phase 6 — Iteration (`docs/devex/phase-6-iteration-review.md` Finding 4)
+**Category:** implementation / verification
+
+`services/document-workspace-service/scripts/detect-unprocessed-events.ts`
+mirrors `services/integration-service`'s audit tool's two-mode shape
+(audit-only, opt-in `--recover=<ms>`) and its classification model
+(`GAP`/`OK`/`DUPLICATE`/`UNEVALUABLE`) exactly - but the actual
+target-reconciliation mechanism underneath had to be genuinely
+different, not a mechanical port:
+
+**The real design fork.** ServiceNow has an indexed `correlation_id`
+field, so its audit issues one filtered query per Salesforce event (N
+events -> N ServiceNow calls, each returning an exact count). SharePoint
+has no equivalent field - the only way to know what exists is to list
+the folder and inspect names. Querying per-event here would mean N
+Graph calls for N events, for no benefit. Instead,
+`listWorkspaceFolders()` (`src/sharepoint/workspaceReconciliation.ts`)
+calls SharePoint exactly **once per run**, and every event is
+classified against that single in-memory snapshot. This also forced two
+things a native-field query never has to handle: pagination
+(`@odata.nextLink`, followed until exhausted) and the workspace root
+folder not existing yet (a fresh site 404s on that path - treated as
+zero folders, not a failure).
+
+**Every branch verified live, against real Salesforce/SharePoint, not
+assumed from the code reading correctly:**
+
+- **GAP**: confirmed both from the real pre-existing history (20 events
+  from before this service existed) and from a freshly published,
+  deliberately-unprocessed event (`correlationId=81e63c71...`).
+- **OK**: confirmed against a real folder created earlier this session.
+- **DUPLICATE**: not naturally occurring - manufactured directly by
+  creating a second real folder sharing an existing correlationId
+  prefix (`a8f20e40...`), confirmed classified `DUPLICATE` with both
+  folder names reported as evidence, then deleted to leave the site
+  clean.
+- **Recovery composition**: the fresh GAP was deliberately made
+  reclaimable (`acquireOperation()` called directly, simulating a crash
+  before completion, same technique `test-production-recovery.ts` uses),
+  then `--recover=1000` correctly created the SharePoint folder and
+  reported `RECOVERED`; a follow-up audit-only run reclassified it
+  `OK` - the same GAP -> RECOVERED -> OK composition OB-0028 validated
+  for ServiceNow, now confirmed for SharePoint too.
+- **Empty-site/404 handling**: verified directly by pointing
+  `listWorkspaceFolders()` at a deliberately nonexistent workspace
+  folder name and confirming it returns `[]` rather than throwing.
+- **The cron wrapper** (`scripts/ops/run-scheduled-audit.sh`, a
+  deliberate mechanical duplicate of the ServiceNow version - see its
+  own header comment for why duplication was judged correct here, not
+  laziness) was run directly, exactly as cron would invoke it: exit 0,
+  `status":"ok"` recorded in `.audit-runs.jsonl` with the same
+  structured shape as the ServiceNow version's evidence.
+
+**Not empirically tested:** pagination past the first page - this
+project has no realistic way to create 200+ real SharePoint folders to
+exercise it, so that specific branch is verified by code review against
+Graph's documented `@odata.nextLink` contract, not by a live experiment.
+Recorded honestly as a gap in evidence, not silently assumed working
+(`docs/devex/phase-2-observation-review.md` Finding 15).
+
+**What this round did not do:** install a standing cron schedule for
+this new audit tool - that remains a separate, deliberate decision, the
+same way it was for ServiceNow (OB-0031).
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

@@ -83,6 +83,12 @@ reusable capability, not just relocated code.
   infrastructure, not needed to answer the question this exercise was
   actually asking.
 
+  > **Phase 6 note:** this was revisited immediately after this
+  > document's own review and decided differently — see
+  > `docs/devex/phase-6-iteration-review.md` Finding 4. The tool now
+  > exists; this passage is left as-is because it accurately records
+  > this round's state at the time, not because it's still current.
+
 ## Friction encountered getting here
 
 Two real, non-code friction items were recorded as they happened, not

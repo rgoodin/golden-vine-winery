@@ -9,7 +9,8 @@
     "dev": "ts-node src/index.ts",
     "start": "node -r ts-node/register/transpile-only dist/index.js",
     "test-production-concurrent-idempotency": "ts-node scripts/test-production-concurrent-idempotency.ts",
-    "test-production-recovery": "ts-node scripts/test-production-recovery.ts"
+    "test-production-recovery": "ts-node scripts/test-production-recovery.ts",
+    "detect-unprocessed-events": "ts-node scripts/detect-unprocessed-events.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

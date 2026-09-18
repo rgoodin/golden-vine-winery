@@ -285,9 +285,29 @@ and the real setup friction encountered along the way
 (`docs/devex/friction-log.md` FL-0032, FL-0033;
 `docs/devex/observations.md` OB-0032). Auth setup:
 `docs/decisions/0008-sharepoint-authentication.md`,
-`docs/runbooks/sharepoint-non-interactive-auth-setup.md`. No scheduled
-audit tooling exists for this target — deliberately out of scope, not
-an oversight (see that service's README).
+`docs/runbooks/sharepoint-non-interactive-auth-setup.md`.
+
+**Phase 6 (Iteration) has begun — a human-led review of what Developer #2's
+exercise actually taught the Golden Path** (`docs/devex/phase-6-iteration-review.md`).
+Five real decisions came out of it, most notably: build SharePoint
+scheduled audit/detection tooling now, a deliberate exception to "don't
+anticipate friction" because the *shape* was already proven once for
+ServiceNow (Finding 4). That tool is now built —
+`services/document-workspace-service/scripts/detect-unprocessed-events.ts` —
+and it needed a genuinely different mechanism than ServiceNow's, not a
+mechanical port: ServiceNow's `correlation_id` field lets its audit
+query once per event; SharePoint has no such field, so
+`listWorkspaceFolders()` lists the target's actual state once per run
+and classifies every event against that single snapshot instead. Every
+classification branch (`GAP`/`OK`/`DUPLICATE`/`UNEVALUABLE`, the
+GAP→RECOVERED→OK composition, and the empty-site/404 case) was verified
+live against real Salesforce/SharePoint, including a deliberately
+manufactured `DUPLICATE` — see `docs/devex/observations.md` OB-0033.
+Pagination past the first page is the one branch not empirically
+tested (no realistic way to create 200+ real folders for this
+portfolio project) — recorded honestly as an evidence gap, not assumed
+working. No standing cron schedule was installed for it — a separate,
+deliberate decision, same as it was for ServiceNow (OB-0031).
 
 A Salesforce Developer Edition org (External Client App, JWT Bearer Flow)
 and a ServiceNow Developer Instance (Client Credentials grant, dedicated
@@ -336,12 +356,13 @@ for that. The same suite exists for `services/document-workspace-service/`
 `services/document-workspace-service/` has the same command shape, from
 that directory: `npm run dev`, `npm run build`, `npm start`,
 `npm run test-production-concurrent-idempotency`,
-`npm run test-production-recovery`. It has no `publish-test-event`
-script of its own - it deliberately reuses `integration-service`'s, to
-exercise real Salesforce Pub/Sub broadcast semantics across two
-independent services rather than duplicate a script. It also has no
-`detect-unprocessed-events`/scheduled-audit equivalent - not built this
-round, see `docs/devex/developer-2-observations.md`.
+`npm run test-production-recovery`,
+`npm run detect-unprocessed-events -- --recover=<ms>`,
+`./scripts/ops/run-scheduled-audit.sh` (Phase 6, OB-0033 - see above).
+It has no `publish-test-event` script of its own - it deliberately
+reuses `integration-service`'s, to exercise real Salesforce Pub/Sub
+broadcast semantics across two independent services rather than
+duplicate a script.
 
 If lint tooling is introduced, update this section with the real
 commands and architecture rather than the aspirational structure
