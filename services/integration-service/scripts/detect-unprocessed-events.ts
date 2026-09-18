@@ -1,9 +1,9 @@
-import { replayRange } from '../src/salesforce/pubsubClient';
+import { replayRange } from 'golden-path-salesforce-transport';
 import { config } from '../src/config';
 import { authenticate } from '../src/servicenow/auth';
 import { toCanonicalEvent } from '../src/salesforce/subscriber';
 import { recoverStaleDistributorOnboardingOperation } from '../src/recoverStaleDistributorOnboardingOperation';
-import { getOperation } from '../src/reliability/idempotencyStore';
+import { getOperation } from 'golden-path-reliability';
 
 /**
  * Audit instrument (Phase 3 - not promoted to the Golden Path), extended
@@ -185,7 +185,7 @@ async function main() {
   console.log(
     `Replaying events from ${from === 'EARLIEST' ? 'EARLIEST (full sweep)' : `replayId=${from}`}...`
   );
-  const events = await replayRange(config.salesforce.pubsubTopic, from);
+  const events = await replayRange(config.salesforce, config.salesforce.pubsubTopic, from);
   console.log(`Collected ${events.length} event(s) from Salesforce.\n`);
 
   const health = checkSweepHealth(events.length);

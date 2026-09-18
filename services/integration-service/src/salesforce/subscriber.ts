@@ -1,5 +1,5 @@
 import { config } from '../config';
-import { subscribe } from './pubsubClient';
+import { subscribe } from 'golden-path-salesforce-transport';
 import { DistributorOnboardingRequestedEvent } from '../types/events';
 
 /**
@@ -45,7 +45,7 @@ export function toCanonicalEvent(raw: Record<string, unknown>): DistributorOnboa
 export async function subscribeToDistributorOnboardingEvents(
   onEvent: (event: DistributorOnboardingRequestedEvent) => void | Promise<void>
 ): Promise<void> {
-  await subscribe(config.salesforce.pubsubTopic, async (raw) => {
+  await subscribe(config.salesforce, config.salesforce.pubsubTopic, async (raw) => {
     await onEvent(toCanonicalEvent(raw.payload));
   });
 }

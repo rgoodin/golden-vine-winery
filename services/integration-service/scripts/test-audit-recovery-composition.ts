@@ -1,9 +1,9 @@
 import { randomUUID } from 'crypto';
 import { execFileSync } from 'child_process';
-import { authenticate as sfAuthenticate } from '../src/salesforce/auth';
+import { authenticate as sfAuthenticate } from 'golden-path-salesforce-transport';
 import { authenticate as snAuthenticate } from '../src/servicenow/auth';
 import { config } from '../src/config';
-import { acquireOperation, getOperation } from '../src/reliability/idempotencyStore';
+import { acquireOperation, getOperation } from 'golden-path-reliability';
 import { createOnboardingIncident } from '../src/servicenow/incidentAdapter';
 import { DistributorOnboardingRequestedEvent } from '../src/types/events';
 
@@ -60,7 +60,7 @@ function makeEvent(correlationId: string, distributorName: string): { payload: R
 
 async function publish(correlationId: string, distributorName: string): Promise<void> {
   const { payload } = makeEvent(correlationId, distributorName);
-  const { accessToken, instanceUrl } = await sfAuthenticate();
+  const { accessToken, instanceUrl } = await sfAuthenticate(config.salesforce);
   const objectApiName = config.salesforce.pubsubTopic.replace(/^\/event\//, '');
   const response = await fetch(`${instanceUrl}/services/data/v60.0/sobjects/${objectApiName}/`, {
     method: 'POST',

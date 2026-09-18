@@ -52,22 +52,37 @@ real service — see "What's deliberately not here yet" below and
   `docs/decisions/0001-integration-architecture.md`)
 - Salesforce auth: OAuth 2.0 JWT Bearer Flow (see
   `docs/decisions/0002-authentication-strategy.md`)
-- Pub/Sub API client: `@grpc/grpc-js` + `@grpc/proto-loader` against
-  Salesforce's officially published `pubsub_api.proto`
-  (`src/salesforce/proto/`), with Avro payload decoding via `avsc`
+- Pub/Sub API transport - auth, gRPC client, schema resolution, replay
+  checkpoint - lives in the `golden-path-salesforce-transport` package
+  (`packages/salesforce-transport/`), extracted as the first Golden Path
+  Enablement slice; see `docs/golden-path/create.md`. This service
+  imports it rather than owning it directly.
+- Durable operation ownership (acquire/reclaim/complete) similarly lives
+  in the `golden-path-reliability` package (`packages/reliability/`).
 - ServiceNow auth: OAuth 2.0 Client Credentials grant, dedicated
   `itil`-role user (see `docs/decisions/0004-servicenow-authentication.md`)
 - ServiceNow target: Incident, via the Table API
-  (`src/servicenow/incidentAdapter.ts`)
+  (`src/servicenow/incidentAdapter.ts`) - not extracted; one target is
+  not enough evidence for a generalized target adapter yet (Phase 2
+  Observation Review, "abstractions are earned through repetition").
 
 ## Setup
 
+This is an npm workspace - **install from the repository root**, not
+from inside this directory:
+
 ```
+cd ../..                 # repository root, if you're here
 npm install
-cp .env.example .env
+cp services/integration-service/.env.example services/integration-service/.env
 # fill in .env - see docs/decisions/0002-authentication-strategy.md and
 # 0004-servicenow-authentication.md for what each value corresponds to
 ```
+
+`npm install` from *inside* this directory will still mostly work
+(npm workspaces resolve upward), but won't set up the
+`golden-path-reliability`/`golden-path-salesforce-transport` symlinks
+correctly on a first install - install at the root.
 
 ## Run
 
@@ -220,6 +235,21 @@ and
 [`docs/runbooks/servicenow-non-interactive-auth-setup.md`](../../docs/runbooks/servicenow-non-interactive-auth-setup.md).
 
 ## Reliability: what's wired in vs. what's not
+
+**File-location note (read this before the file paths below):** the
+mechanisms this section describes were extracted out of `src/` into
+`packages/reliability/` and `packages/salesforce-transport/` as the
+first Golden Path Enablement slice - see `docs/golden-path/create.md`
+and `docs/golden-path/0001-enablement-inventory.md`. The *behavior*
+described below is unchanged and still accurate; several `src/...`
+paths in the historical narrative that follows now refer to code that
+has moved. Where it matters, current locations are:
+`golden-path-reliability` (was `src/reliability/idempotencyStore.ts`)
+and `golden-path-salesforce-transport` (was `src/salesforce/auth.ts`,
+`checkpoint.ts`, `pubsubClient.ts`). `src/servicenow/*` and
+`src/processDistributorOnboardingEvent.ts`/
+`recoverStaleDistributorOnboardingOperation.ts` are unchanged and still
+where the narrative says.
 
 A reliability architecture spike
 ([`docs/architecture/0001-reliability-architecture-spike.md`](../../docs/architecture/0001-reliability-architecture-spike.md),

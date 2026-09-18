@@ -245,17 +245,42 @@ established "It's a Golden Path, not a gold watch" as a durable
 principle. See also `docs/golden-path/0002-design-principles.md` and
 `docs/golden-path/ownership-boundaries.md`, both derived from this
 review, and `docs/golden-path/0001-enablement-inventory.md` (analysis
-input, not itself a backlog). Documentation only — no Golden Path
-capability has been scaffolded or extracted as a result.
+input, not itself a backlog). That review round was documentation
+only — no Golden Path capability was scaffolded or extracted as part
+of it.
+
+**The smallest usable Golden Path slice that review recommended has
+since been built and verified.** This repository is now an npm
+workspace (`package.json` at the root). `golden-path-reliability` and
+`golden-path-salesforce-transport` (`packages/`) are real, separately
+importable packages — durable operation ownership and Salesforce Pub/Sub
+transport, respectively, extracted out of
+`services/integration-service/src/` with their global-config
+dependencies replaced by explicit parameters (see each package's own
+README for its public API and what it deliberately still doesn't know).
+Verified against real Salesforce/ServiceNow after extraction: normal
+processing, checkpoint resume, concurrent-initial-processing protection,
+both crash-boundary recoveries, concurrent reclaim, the audit-only
+sweep, and the exact cron wrapper script all confirmed working through
+the new package structure, with zero behavior change — this was a
+where-the-code-lives change, not a what-it-does change. The
+Start → Create → Configure → Run → Verify → Evaluate walkthrough this
+enables lives at `docs/golden-path/start.md` onward. ServiceNow-side
+code was **not** touched or generalized — one target remains
+insufficient evidence for a target-adapter interface
+(`docs/golden-path/0002-design-principles.md`).
 
 A Salesforce Developer Edition org (External Client App, JWT Bearer Flow)
 and a ServiceNow Developer Instance (Client Credentials grant, dedicated
 `itil`-role user) have been set up for testing; credentials live in
 `services/integration-service/.env` (gitignored, not in this repo).
 
-Commands (from `services/integration-service/`):
+Commands:
 
-    npm install                                   # install dependencies
+    npm install                                   # from the REPOSITORY ROOT - sets up the packages/* workspace symlinks
+
+The rest, from `services/integration-service/`:
+
     npm run dev                                   # run the subscriber (creates ServiceNow Incidents)
     npm run publish-test-event -- "Some Name"      # publish a test Salesforce event
     npm run build                                 # compile to dist/
@@ -789,22 +814,37 @@ not a violation to correct.
 
 Do not create the entire repository structure prematurely.
 
-A likely future structure may resemble:
+Current structure (as of the first Golden Path Enablement slice):
 
     .
+    ├── package.json           # npm workspace root
     ├── CLAUDE.md
     ├── README.md
     ├── docs/
     │   ├── architecture/
     │   ├── devex/
     │   ├── decisions/
+    │   ├── golden-path/        # philosophy, inventory, ownership, Start->Evaluate walkthrough
     │   └── runbooks/
+    ├── packages/               # Golden Path capability - only what's been extracted with real evidence
+    │   ├── reliability/
+    │   └── salesforce-transport/
+    └── services/
+        └── integration-service/
+
+A further-future structure may still add:
+
     ├── schemas/
-    ├── services/
     ├── tests/
     ├── infrastructure/
     └── .github/
         └── workflows/
+
+Each addition to `packages/` should follow the same discipline that
+produced the first two: extracted because a real, evidenced need showed
+it was reusable (`docs/golden-path/0001-enablement-inventory.md`,
+`docs/golden-path/0002-design-principles.md`), not created speculatively
+ahead of that evidence.
 
 Allow the structure to evolve with the project.
 

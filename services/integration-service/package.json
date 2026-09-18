@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "ts-node src/index.ts",
-    "start": "node dist/index.js",
+    "start": "node -r ts-node/register/transpile-only dist/index.js",
     "publish-test-event": "ts-node scripts/publish-test-event.ts",
     "create-platform-event-fields": "ts-node scripts/create-platform-event-fields.ts",
     "verify-recent-incidents": "ts-node scripts/verify-recent-incidents.ts",
@@ -25,14 +25,11 @@
     "test-audit-recovery-composition": "ts-node scripts/test-audit-recovery-composition.ts"
   },
   "dependencies": {
-    "@grpc/grpc-js": "^1.10.9",
-    "@grpc/proto-loader": "^0.7.13",
-    "avsc": "^5.7.7",
     "dotenv": "^16.4.5",
-    "jsonwebtoken": "^9.0.2"
+    "golden-path-reliability": "*",
+    "golden-path-salesforce-transport": "*"
   },
   "devDependencies": {
-    "@types/jsonwebtoken": "^9.0.6",
     "@types/node": "^20.14.10",
     "ts-node": "^10.9.2",
     "typescript": "^5.5.4"

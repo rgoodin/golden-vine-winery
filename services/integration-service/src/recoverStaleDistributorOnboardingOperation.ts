@@ -1,7 +1,7 @@
 import { DistributorOnboardingRequestedEvent } from './types/events';
 import { createOnboardingIncident } from './servicenow/incidentAdapter';
 import { findIncidentByCorrelationId } from './servicenow/incidentReconciliation';
-import { reclaimOperation, completeOperation, getOperation } from './reliability/idempotencyStore';
+import { reclaimOperation, completeOperation, getOperation } from 'golden-path-reliability';
 
 export interface RecoveryResult {
   businessOperationId: string;

@@ -1,6 +1,6 @@
 import { DistributorOnboardingRequestedEvent } from './types/events';
 import { createOnboardingIncident } from './servicenow/incidentAdapter';
-import { acquireOperation, completeOperation, getOperation } from './reliability/idempotencyStore';
+import { acquireOperation, completeOperation, getOperation } from 'golden-path-reliability';
 
 export interface ProcessResult {
   businessOperationId: string;

@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { authenticate } from '../src/salesforce/auth';
+import { authenticate } from 'golden-path-salesforce-transport';
 import { config } from '../src/config';
 
 /**
@@ -15,7 +15,7 @@ async function main() {
   const distributorName = process.argv[2] ?? 'Test Distributor';
   const fixedId = process.argv[3];
 
-  const { accessToken, instanceUrl } = await authenticate();
+  const { accessToken, instanceUrl } = await authenticate(config.salesforce);
   const objectApiName = config.salesforce.pubsubTopic.replace(/^\/event\//, '');
 
   const payload = {

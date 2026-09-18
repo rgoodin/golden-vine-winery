@@ -1,4 +1,4 @@
-import { getTopicInfo } from '../src/salesforce/pubsubClient';
+import { getTopicInfo } from 'golden-path-salesforce-transport';
 import { config } from '../src/config';
 
 /**
@@ -8,7 +8,7 @@ import { config } from '../src/config';
  * docs/devex/friction-log.md (Phase 3 Enablement, LL-0007 experiment).
  */
 async function main() {
-  const info = await getTopicInfo(config.salesforce.pubsubTopic);
+  const info = await getTopicInfo(config.salesforce, config.salesforce.pubsubTopic);
   console.log('TopicInfo:', info);
 }
 

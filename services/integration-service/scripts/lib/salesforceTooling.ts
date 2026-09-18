@@ -1,4 +1,5 @@
-import { authenticate } from '../../src/salesforce/auth';
+import { authenticate } from 'golden-path-salesforce-transport';
+import { config } from '../../src/config';
 
 export interface CustomFieldSpec {
   fieldName: string;
@@ -17,7 +18,7 @@ export async function createCustomField(
   objectApiName: string,
   field: CustomFieldSpec
 ): Promise<{ success: boolean; body: unknown }> {
-  const { accessToken, instanceUrl } = await authenticate();
+  const { accessToken, instanceUrl } = await authenticate(config.salesforce);
 
   const response = await fetch(`${instanceUrl}/services/data/v60.0/tooling/sobjects/CustomField/`, {
     method: 'POST',

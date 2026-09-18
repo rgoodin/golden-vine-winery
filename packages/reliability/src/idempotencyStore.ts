@@ -3,8 +3,9 @@ import * as path from 'path';
 /**
  * Minimal typing for node:sqlite (experimental as of Node 22, not yet
  * covered by this project's pinned @types/node) - just the surface this
- * module actually uses. See scripts/lib/idempotencyStore.ts (FL-0019)
- * for why this shim exists instead of a typed import.
+ * module actually uses. See scripts/lib/idempotencyStore.ts (FL-0019) in
+ * services/integration-service for why this shim exists instead of a
+ * typed import.
  */
 interface SqliteStatement {
   run(...params: unknown[]): { changes: number | bigint; lastInsertRowid: number | bigint };
@@ -19,15 +20,17 @@ interface SqliteDatabase {
 const { DatabaseSync } = require('node:sqlite') as { DatabaseSync: new (path: string) => SqliteDatabase };
 
 /**
- * Tier 1 durable ownership (docs/decisions/0005-external-side-effect-reliability-contract.md).
+ * Tier 1 durable ownership
+ * (docs/decisions/0005-external-side-effect-reliability-contract.md in
+ * the golden-vine-winery repo this package originated from).
  *
  * This is the production form of the mechanism validated experimentally
- * in scripts/lib/idempotencyStore.ts (OB-0017, OB-0021): a real
- * `PRIMARY KEY` constraint is the atomic gate deciding which caller owns
- * a business operation - never a prior `SELECT` (that race is exactly
- * why Candidate B was rejected - see the architecture spike, Candidate
- * B). Two differences from the experimental version, deliberate, not
- * accidental:
+ * in golden-vine-winery's scripts/lib/idempotencyStore.ts (OB-0017,
+ * OB-0021): a real `PRIMARY KEY` constraint is the atomic gate deciding
+ * which caller owns a business operation - never a prior `SELECT` (that
+ * race is exactly why Candidate B was rejected - see the architecture
+ * spike, Candidate B). Two differences from that experimental version,
+ * deliberate, not accidental:
  *
  * - A single module-level connection, opened once and reused, rather
  *   than opened per call - appropriate for a long-running service
@@ -35,14 +38,20 @@ const { DatabaseSync } = require('node:sqlite') as { DatabaseSync: new (path: st
  * - Only ownership/state primitives live here: `acquireOperation`,
  *   `reclaimOperation`, `completeOperation`, `getOperation`. Target
  *   reconciliation (deciding what "stale" should actually resolve to
- *   against a specific target) is deliberately NOT here - see
- *   `src/servicenow/incidentReconciliation.ts` and
- *   `src/recoverStaleDistributorOnboardingOperation.ts`. This module
- *   knows nothing about ServiceNow, Incidents, or any other target; it
- *   only knows which business operations are in flight, stale, or
- *   completed. Keeping that boundary is what lets a second target reuse
- *   this module unchanged (see `docs/devex/dojo-perspectives.md`
- *   DP-0003).
+ *   against a specific target) deliberately does not live here - this
+ *   module knows nothing about ServiceNow, Incidents, or any other
+ *   target; it only knows which business operations are in flight,
+ *   stale, or completed. That boundary is what makes this package
+ *   reusable across targets and, eventually, across integrations -
+ *   see docs/golden-path/0002-design-principles.md ("hide accidental
+ *   complexity, not legitimate decisions") in golden-vine-winery for
+ *   why that boundary was drawn here specifically.
+ *
+ * The database file lives at `<cwd>/.idempotency.sqlite` - relative to
+ * wherever the *consuming* process runs, not to this package's own
+ * install location. A service that runs from its own directory (as
+ * every current caller does) gets its own store for free, with no
+ * required configuration.
  */
 
 export type OperationStatus = 'in_flight' | 'completed';
@@ -56,7 +65,7 @@ export interface OperationRecord {
   completedAt: string | null;
 }
 
-const DB_PATH = path.join(__dirname, '..', '..', '.idempotency.sqlite');
+const DB_PATH = path.join(process.cwd(), '.idempotency.sqlite');
 
 let db: SqliteDatabase | null = null;
 
@@ -125,18 +134,21 @@ export function completeOperation(businessOperationId: string, incidentSysId: st
 /**
  * Atomic, conditional reclaim of a stale `in_flight` operation - the
  * production form of the mechanism validated experimentally in
- * `scripts/lib/idempotencyStore.ts` (OB-0020, OB-0021). A caller
- * reclaims only if the row is still `in_flight` AND its `acquired_at` is
- * older than `staleAfterMs`; both conditions are evaluated inside the
- * single `UPDATE`'s `WHERE` clause, so the database engine - not a prior
- * read - decides whether this call's reclaim took effect (`changes >
- * 0`). Same "constraint decides, not a read" principle as
- * `acquireOperation`, applied to recovery instead of first creation.
+ * golden-vine-winery's `scripts/lib/idempotencyStore.ts` (OB-0020,
+ * OB-0021). A caller reclaims only if the row is still `in_flight` AND
+ * its `acquired_at` is older than `staleAfterMs`; both conditions are
+ * evaluated inside the single `UPDATE`'s `WHERE` clause, so the database
+ * engine - not a prior read - decides whether this call's reclaim took
+ * effect (`changes > 0`). Same "constraint decides, not a read"
+ * principle as `acquireOperation`, applied to recovery instead of first
+ * creation.
  *
  * `staleAfterMs` is supplied by the caller, not defaulted here - this
  * module has no opinion on how long is "genuinely abandoned" for any
  * particular target or business operation; that judgment belongs with
- * whatever invokes recovery.
+ * whatever invokes recovery (a business/customer risk decision, not a
+ * platform one - see docs/devex/phase-2-observation-review.md Finding
+ * 11 in golden-vine-winery).
  *
  * A row with no matching `in_flight`/stale state - because it was never
  * acquired, is still fresh, or is already `completed` - reclaims
@@ -147,10 +159,10 @@ export function completeOperation(businessOperationId: string, incidentSysId: st
  *
  * "Stale" here means "eligible for recovery under this policy," not
  * "proven dead." A slow-but-still-running original owner can be
- * reclaimed by this same mechanism while its own ServiceNow call is
+ * reclaimed by this same mechanism while its own external call is
  * genuinely still in flight - confirmed unsafe with real independent
- * processes in OB-0022, and NOT solved by this function or anything
- * that calls it. That gap is preserved, not reopened, by this round.
+ * processes (OB-0022), and NOT solved by this function or anything that
+ * calls it.
  */
 export function reclaimOperation(businessOperationId: string, staleAfterMs: number): boolean {
   const cutoff = new Date(Date.now() - staleAfterMs).toISOString();

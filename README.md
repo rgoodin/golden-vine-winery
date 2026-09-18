@@ -60,17 +60,23 @@ correlation IDs, testing, CI/CD, IaC, etc.) are documented in
 
 ```
 .
+├── package.json                  # npm workspace root (packages/* + services/*)
 ├── CLAUDE.md                     # Project charter, philosophy, phases, and constraints
 ├── README.md                     # This file
 ├── docs/
 │   ├── architecture/              # Architecture spikes (investigation, not yet a decision)
 │   ├── decisions/                 # Architecture Decision Records (ADRs)
 │   ├── runbooks/                  # Platform setup checklists (Phase 3 Enablement)
+│   ├── golden-path/                # Golden Path philosophy, inventory, and Start->Evaluate walkthrough
 │   └── devex/                     # Developer experience journal
 │       ├── observations.md        # Raw, chronological observations
 │       ├── friction-log.md        # Friction items (Observation/Friction/Impact/Enablement)
 │       ├── decisions.md           # Lightweight, working-level decisions
-│       └── lessons-learned.md     # Synthesized patterns, classified during Phase 2 review
+│       ├── lessons-learned.md     # Synthesized patterns, classified during Phase 2 review
+│       └── phase-2-observation-review.md  # Human-led review checkpoint (findings, not just logs)
+├── packages/                     # Golden Path capability, extracted once proven reusable
+│   ├── reliability/                # golden-path-reliability - durable operation ownership
+│   └── salesforce-transport/       # golden-path-salesforce-transport - Pub/Sub API transport
 └── services/
     └── integration-service/      # Node.js + TypeScript: Salesforce -> ServiceNow
 ```
@@ -157,6 +163,23 @@ runs hourly on a real, installed schedule - an explicitly provisional
 evidence-gathering cadence, not a chosen Tier 1 audit SLA or a recovery
 policy. Scheduled recovery remains a separate, later decision, gated on
 cadence and staleness evidence this hourly job exists to accumulate.
+
+**A human-led Phase 2 Observation Review checkpoint followed** -
+[`docs/devex/phase-2-observation-review.md`](./docs/devex/phase-2-observation-review.md) -
+reaching 15 numbered findings about what should become reusable Golden
+Path capability vs. stay a developer/business decision, and retiring
+"Tier 1/Tier 2" as forward-looking terminology (the ADRs above are kept
+unmodified as historical record - see the ADRs' own cross-reference
+notes). That review's smallest usable Golden Path slice has since been
+built: `golden-path-reliability` and `golden-path-salesforce-transport`
+(`packages/`) are now real, separately importable packages, not just a
+recommendation - see
+[`docs/golden-path/start.md`](./docs/golden-path/start.md) for the
+Start → Create → Configure → Run → Verify → Evaluate walkthrough this
+produced, and
+[`docs/golden-path/0002-design-principles.md`](./docs/golden-path/0002-design-principles.md)
+for why extraction stopped exactly there (no ServiceNow-side
+generalization yet - one target isn't enough evidence).
 
 See [`CLAUDE.md`](./CLAUDE.md) ("Current Repository State") for the
 up-to-date summary,

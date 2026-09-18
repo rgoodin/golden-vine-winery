@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { config } from '../src/config';
 import { authenticate } from '../src/servicenow/auth';
-import { acquireOperation } from '../src/reliability/idempotencyStore';
+import { acquireOperation } from 'golden-path-reliability';
 import { createOnboardingIncident } from '../src/servicenow/incidentAdapter';
 import { recoverStaleDistributorOnboardingOperation } from '../src/recoverStaleDistributorOnboardingOperation';
 import { DistributorOnboardingRequestedEvent } from '../src/types/events';

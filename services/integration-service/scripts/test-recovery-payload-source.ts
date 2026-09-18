@@ -1,8 +1,7 @@
 import { randomUUID } from 'crypto';
-import { authenticate as sfAuthenticate } from '../src/salesforce/auth';
-import { replayRange } from '../src/salesforce/pubsubClient';
+import { authenticate as sfAuthenticate, replayRange } from 'golden-path-salesforce-transport';
 import { config } from '../src/config';
-import { acquireOperation } from '../src/reliability/idempotencyStore';
+import { acquireOperation } from 'golden-path-reliability';
 
 /**
  * Bounded investigation (NOT another reliability redesign) into FL-0024:
@@ -35,7 +34,7 @@ async function publishEvent(
   distributorName: string,
   correlationId: string
 ): Promise<{ eventId: string; correlationId: string }> {
-  const { accessToken, instanceUrl } = await sfAuthenticate();
+  const { accessToken, instanceUrl } = await sfAuthenticate(config.salesforce);
   const objectApiName = config.salesforce.pubsubTopic.replace(/^\/event\//, '');
   const eventId = randomUUID();
 
@@ -87,7 +86,7 @@ async function part1SourceOwnedRecovery() {
   );
 
   const start = Date.now();
-  const events = await replayRange(config.salesforce.pubsubTopic, 'EARLIEST');
+  const events = await replayRange(config.salesforce, config.salesforce.pubsubTopic, 'EARLIEST');
   const elapsedMs = Date.now() - start;
 
   const match = events.find((e) => e.payload.Correlation_Id__c === operationId);
@@ -122,7 +121,7 @@ async function part2DurableReference() {
   await publishEvent('Recovery Payload Source Test - Part 2 - Event B', idB);
 
   console.log('Waiting for both to be retained, then finding event A\'s own replayId via a full sweep...');
-  const sweep = await replayRange(config.salesforce.pubsubTopic, 'EARLIEST');
+  const sweep = await replayRange(config.salesforce, config.salesforce.pubsubTopic, 'EARLIEST');
   const eventA = sweep.find((e) => e.payload.Correlation_Id__c === idA);
   if (!eventA) {
     throw new Error('Could not locate event A in the sweep - cannot run this part of the experiment.');
@@ -137,7 +136,7 @@ async function part2DurableReference() {
       'testing that directly rather than trusting the comment.'
   );
 
-  const resumed = await replayRange(config.salesforce.pubsubTopic, replayIdA);
+  const resumed = await replayRange(config.salesforce, config.salesforce.pubsubTopic, replayIdA);
   const eventAPresent = resumed.some((e) => e.payload.Correlation_Id__c === idA);
   const eventBPresent = resumed.some((e) => e.payload.Correlation_Id__c === idB);
 

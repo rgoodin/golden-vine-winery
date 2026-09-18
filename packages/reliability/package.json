@@ -1,0 +1,8 @@
+{
+  "name": "golden-path-reliability",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Target/source-agnostic durable operation ownership (Golden Path Enablement slice)",
+  "main": "src/index.ts",
+  "types": "src/index.ts"
+}
