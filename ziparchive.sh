@@ -1,0 +1,1 @@
+ zip -r golden-vine-winery.zip . -x@zip_exclude_list.txt

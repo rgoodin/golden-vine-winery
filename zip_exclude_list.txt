@@ -1,0 +1,17 @@
+.gitlab-ci-local*
+.idea*
+.venv*
+.env*
+*/.env*
+.git*
+.pytest_cache*
+.ruff_cache*
+*/.terraform*
+*/node_modules*
+*.next*
+node_modules*
+*/certs*
+*/dist*
+*/.checkpoint.json
+*/.idempotency*.sqlite*
+*/.audit-*
