@@ -1123,6 +1123,16 @@ Document the distinction between:
 
 This project should use GitHub.
 
+> **Note (2026-09-18):** this section was aspirational, unenforced text
+> for the entire project's history until now - every prior commit
+> actually pushed to GitLab (`gitlab.com:rgoodin2/golden-vine-winery`),
+> not GitHub, and nothing caught the gap until CI/CD scoping required
+> checking. Hosting has now been migrated to
+> [github.com/rgoodin/golden-vine-winery](https://github.com/rgoodin/golden-vine-winery)
+> (full history preserved), making this section accurate going forward.
+> The GitLab remote (`gitlab`) still exists, untouched, as a backup -
+> see `docs/devex/friction-log.md` FL-0034.
+
 Prefer GitHub Actions for CI/CD.
 
 Organization-level secrets may be used when appropriate.

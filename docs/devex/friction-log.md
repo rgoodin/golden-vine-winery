@@ -1735,4 +1735,50 @@ documents the trial-signup path actually used.
 
 ---
 
+### FL-0034: `CLAUDE.md` said "use GitHub" for months while the repository actually lived on GitLab
+
+**Date:** 2026-09-18
+**Phase:** CI/CD scoping (pre-work)
+
+#### Observation
+
+Before scoping CI/CD, the plan was to check which CI system to target.
+`CLAUDE.md`'s own `# GitHub` section reads: "This project should use
+GitHub. Prefer GitHub Actions for CI/CD." Checking `git remote -v`
+before assuming that was still true showed the repository has actually
+been hosted on GitLab (`gitlab.com:rgoodin2/golden-vine-winery`) this
+entire time - every commit this project has ever made was pushed
+there, not to GitHub.
+
+#### Friction
+
+A standing instruction in the project's own charter document had been
+silently wrong (or silently overtaken by an earlier, unrecorded
+decision to use GitLab instead) for the whole project's history, and
+nothing caught the mismatch until it actually mattered for a concrete
+task. This is the same class of problem
+`docs/devex/phase-2-observation-review.md` Finding 1 named for
+Salesforce configuration - a documentation/reality gap that persists
+invisibly until something forces a direct check.
+
+#### Impact
+
+Low cost this time - caught before any CI/CD work was built against
+the wrong assumption, by checking the actual remote rather than trusting
+the doc. Could have been more costly if GitHub Actions workflows had
+been written first and only failed to matter later.
+
+#### Possible Enablement
+
+Not decided here. Worth the Dojo considering, generally: for any
+standing instruction naming a specific external tool/platform/service,
+periodically verify it against actual observable state (`git remote
+-v`, account settings, etc.) rather than trusting it indefinitely once
+written. This instance was resolved by migrating hosting to GitHub
+(full history preserved, GitLab kept as a backup remote, not deleted)
+rather than correcting the document - the user's explicit choice, made
+directly in response to being asked rather than decided unilaterally.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->
