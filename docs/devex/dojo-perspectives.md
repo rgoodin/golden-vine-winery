@@ -9,6 +9,14 @@ after every change. See `docs/devex/observations.md`,
 `docs/devex/friction-log.md`, and `docs/devex/lessons-learned.md` for
 the underlying evidence each entry here draws on.
 
+See `docs/devex/phase-2-observation-review.md` for the first completed
+human-led Observation Review - the step the DevEx Dojo cycle now
+includes between raw entries here and any Enablement decision (`CLAUDE.md`,
+"Human-Led DevEx Observation Review"). That review's findings are
+human-reviewed conclusions; the entries below remain per-round,
+per-perspective observations feeding into reviews like it, not a
+substitute for one.
+
 ---
 
 ## Template

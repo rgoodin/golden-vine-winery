@@ -14,6 +14,16 @@ FL-0027 (the specific operational risks this contract responds to).
 This document records the contract; the observations/friction entries
 have the supporting detail and are cited, not repeated.
 
+> **Phase 2 Observation Review note:** this document's "Tier 1"
+> language is preserved unmodified as historical record - see
+> `docs/devex/phase-2-observation-review.md` Finding 12. Separately,
+> Finding 11 sharpens *why* this ADR refuses to pick a `staleAfterMs`
+> value: not only because the latency/frequency evidence doesn't exist
+> yet, but because that threshold is a business/customer recovery-risk
+> decision Platform was never authorized to make unilaterally in the
+> first place. This ADR's contract (§2) is consistent with that
+> finding without needing to change.
+
 ## Context
 
 ### The question

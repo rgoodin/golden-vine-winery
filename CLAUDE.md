@@ -234,6 +234,20 @@ investigation, and tests. See
 `docs/devex/dojo-perspectives.md` for what these Enablement rounds
 looked like from each DevEx Dojo role.
 
+**A human-led Phase 2 Observation Review checkpoint is now complete —
+`docs/devex/phase-2-observation-review.md`.** This is a separate,
+higher-order review from the contemporaneous "Phase 2" cycles
+summarized above; it reached 15 numbered findings about what should
+become reusable Golden Path capability vs. stay a developer/business
+decision, retired "Tier 1/Tier 2" as forward-looking terminology
+(without rewriting ADRs 0005–0007, which remain historical record), and
+established "It's a Golden Path, not a gold watch" as a durable
+principle. See also `docs/golden-path/0002-design-principles.md` and
+`docs/golden-path/ownership-boundaries.md`, both derived from this
+review, and `docs/golden-path/0001-enablement-inventory.md` (analysis
+input, not itself a backlog). Documentation only — no Golden Path
+capability has been scaffolded or extracted as a result.
+
 A Salesforce Developer Edition org (External Client App, JWT Bearer Flow)
 and a ServiceNow Developer Instance (Client Credentials grant, dedicated
 `itil`-role user) have been set up for testing; credentials live in
@@ -311,15 +325,47 @@ We are intentionally beginning as **Developer #1**.
 
 The project follows the DevEx Dojo improvement cycle:
 
+    Developer experience
+            ↓
     Observation
-        ↓
-    Enablement
-        ↓
-    Mastery / Empowerment
-        ↓
-    Observation again
+            ↓
+    Human Observation Review
+            ↓
+    Developer / Instructor /
+    Platform Engineer / Director
+    perspectives
+            ↓
+    Enablement decision
+            ↓
+    Golden Path / Dojo capability
+            ↓
+    Next developer
+            ↓
+    New observations
 
-The Golden Path must emerge from observed developer friction.
+**Human Observation Review is a deliberate step, not a formality.**
+Raw friction logs do not translate themselves into Golden Path
+requirements. The Dojo is not a mechanism for saying:
+
+    friction → automate it
+
+It is a mechanism for deciding whether a piece of observed complexity
+should be taught, standardized, automated, left visible, owned
+elsewhere, or investigated further — see "Human-Led DevEx Observation
+Review" below for what this means operationally, and
+`docs/devex/phase-2-observation-review.md` for the first completed
+review of this kind.
+
+**Developer #2 is not the end of the cycle.** Developer #1 discovers
+the terrain. Developer #2 tests whether what was learned actually
+transfers to a second implementation. A later Developer #3 may expose a
+requirement that invalidates an assumption baked into the existing
+path — that is a healthy signal the cycle is supposed to produce, not a
+failure to comply with the Golden Path (see "Golden Path Adoption"
+below).
+
+The Golden Path must emerge from observed developer friction, reviewed
+by a human before it becomes a decision.
 
 Do not prematurely automate a problem we have not experienced.
 
@@ -473,6 +519,28 @@ Recommended structure:
         friction-log.md
         lessons-learned.md
 
+**Record friction before coding starts, not only during
+implementation.** A completed review of this project's own history
+(`docs/devex/phase-2-observation-review.md`, Finding 1) found real,
+meaningful friction — Salesforce configuration choices made before
+having enough experience to understand their consequences — that the
+original logs never captured, because deliberate recording only began
+once implementation was underway. The observation mechanism was biased
+toward implementation friction simply because that's when someone
+started paying attention. Explicitly include:
+
+- environment provisioning
+- account creation
+- platform configuration
+- permissions and access requests
+- terminology mismatches (what the docs call something vs. what the UI
+  actually shows)
+- credential retrieval
+- documentation discovery (did you find the right docs, and how long
+  did that take)
+- decisions that feel premature — a choice the tool is asking for
+  before you have enough context to make it well
+
 Each meaningful friction item should capture:
 
 ## Observation
@@ -546,6 +614,47 @@ Do not confuse these roles.
 
 The developer experience should be understood before the platform engineer
 abstracts it.
+
+
+# Human-Led DevEx Observation Review
+
+The DevEx Dojo uses a human-led Observation Review between raw
+Developer experience and Enablement. See
+`docs/devex/phase-2-observation-review.md` for the first completed
+review of this kind, and the updated cycle diagram under "Core
+Principle" above for where this step sits.
+
+Claude may:
+
+- record friction, observations, experiments, failures, and lessons;
+- preserve contemporaneous evidence;
+- identify possible enablement candidates;
+- implement bounded work explicitly approved after review.
+
+Claude must not:
+
+- automatically convert friction into Golden Path requirements;
+- treat "Possible Enablement" entries as approved backlog;
+- promote Developer #1 architectural conclusions into universal
+  Golden Path policy without human review;
+- infer customer/business semantics such as business-operation
+  identity or duplicate definition;
+- choose customer risk policy such as recovery thresholds;
+- claim reliability properties stronger than demonstrated evidence;
+- generalize abstractions solely because doing so is technically possible;
+- begin the next Enablement implementation merely because an inventory
+  identifies a reusable candidate.
+
+Human reviewers determine whether an observation should be:
+
+- taught by the Dojo;
+- exposed as a developer decision;
+- standardized by Platform;
+- automated by Platform;
+- owned by Operations;
+- owned by Business/Customer;
+- left implementation-specific;
+- investigated further.
 
 
 # Golden Path Evolution
@@ -628,6 +737,52 @@ Improve the Golden Path based on the second developer experience.
 
 This demonstrates that the platform evolves through observation rather than
 centralized assumptions.
+
+
+# Golden Path Reliability Claims
+
+Do not use Tier 1 / Tier 2 terminology as the Golden Path reliability model.
+
+Describe reliability in terms of intended behavior, experimental evidence,
+known limitations, and consumer validation.
+
+Use this principle:
+
+    "Here is the reliability behavior this profile is designed to provide.
+    Here are the experiments that established it. Run them against your
+    implementation. Compare the observations with your customer's
+    requirements. Do not claim a stronger property than your evidence
+    supports."
+
+The Golden Path is a set of evidence-backed guardrails, not a guarantee
+that an implementation satisfies a customer's requirements.
+
+    "It's a Golden Path, not a gold watch."
+
+See `docs/devex/phase-2-observation-review.md` (Findings 9, 12) and
+`docs/golden-path/0002-design-principles.md` for the full reasoning.
+`docs/decisions/0005-external-side-effect-reliability-contract.md`
+through `0007` remain historical evidence of the Tier 1/Tier 2
+reasoning Developer #1 actually used and are not rewritten to match
+this section.
+
+
+# Golden Path Adoption
+
+Use of the Golden Path is encouraged, not mandatory.
+
+A developer may determine through evidence that the Golden Path is
+insufficient for a customer requirement.
+
+Developers should be encouraged to bring that evidence to Platform/Dojo
+before independently abandoning the path when practical.
+
+A justified exception is an Observation and may become input to the next
+Golden Path iteration.
+
+Do not turn this philosophy into "Golden Path compliance." A developer
+who deviates with evidence has produced a useful signal for the Dojo,
+not a violation to correct.
 
 
 # Repository Direction

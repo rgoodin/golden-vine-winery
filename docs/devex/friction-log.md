@@ -1565,4 +1565,59 @@ should have this guard, not just this one.
 
 ---
 
+### FL-0031: Repository/archive packaging failed to exclude a real `.env` containing live credentials
+
+**Date:** 2026-09-17
+**Phase:** Phase 2 (Observation Review) - discovered incidentally, not
+during an Enablement round
+
+#### Observation
+
+The project owner created a local zip archive of the repository
+(`golden-vine-winery.zip`, via a `zip_exclude_list.txt` +
+`ziparchive.sh` pair, outside any Claude-driven task) for sharing
+purposes.
+
+#### Friction
+
+The exclude list did not cover `.env` (only `.git*`, `.idea*`,
+`.venv*`, `node_modules*`, and similar noise directories). Checking the
+resulting archive's contents confirmed it, without needing to
+reproduce any value, included the real
+`services/integration-service/.env` - a file `.gitignore` already
+correctly excludes from version control, but which a *separate*,
+independently-maintained packaging mechanism did not know to exclude.
+Excluding a secret from git is not the same as excluding it from every
+other way the repository's contents might get bundled and shared.
+
+#### Impact
+
+A credential-bearing file nearly left the project's controlled
+boundary via a path that had nothing to do with git and therefore
+wasn't caught by any of the existing git-focused safeguards
+(`.gitignore`, pre-commit review habits). Discovered and flagged before
+the archive was actually shared; the project owner corrected the
+exclude list and deleted the archive once notified. Full credential
+rotation for both Salesforce and ServiceNow was subsequently performed
+as a precaution (see `docs/runbooks/salesforce-non-interactive-auth-setup.md`
+and `docs/runbooks/servicenow-non-interactive-auth-setup.md` for the
+rotation procedure itself - no secret values are reproduced in this
+entry or anywhere else in this journal).
+
+#### Possible Enablement
+
+Not decided here - recorded as an observation for the Dojo to review,
+consistent with this project's process (`docs/devex/phase-2-observation-review.md`,
+"Human-Led DevEx Observation Review" in `CLAUDE.md`), not instantly
+converted into a feature. Worth considering, when reviewed: an explicit
+secret-exclusion/verification step for any future portfolio/export
+packaging mechanism, separate from and not assumed covered by
+`.gitignore`. This is a real example of the general class of problem
+Finding 1 (`docs/devex/phase-2-observation-review.md`) names - a
+mechanism (packaging, in this case; the original observation-capture
+process, in that finding's case) had a blind spot nobody had reason to
+look for until it actually mattered.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

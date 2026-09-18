@@ -11,6 +11,12 @@ decision) and OB-0027 (the investigation this ADR formalizes). This
 document records the decision; OB-0027 has the full experimental
 detail and is cited, not repeated.
 
+> **Phase 2 Observation Review note:** this document's "Tier 1"
+> language is preserved unmodified as historical record. New Golden
+> Path material uses different terminology - see
+> `docs/devex/phase-2-observation-review.md` Finding 12. The decision
+> itself (source-owned recovery payload) is unaffected.
+
 ## Context
 
 ### The question

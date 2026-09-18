@@ -14,6 +14,16 @@ material this builds on, and ADRs 0001-0007 /
 `docs/devex/{observations,friction-log,lessons-learned}.md` for the
 underlying evidence, cited below rather than repeated.
 
+**This inventory is analysis input, not a source of requirements on its
+own.** The formal, authoritative record of the Observation Review's
+conclusions is `docs/devex/phase-2-observation-review.md` - read that
+document for *why* the classifications below are drawn where they are,
+and `docs/golden-path/0002-design-principles.md` for the design
+principles derived from it. This inventory's own candidates do not
+become an approved backlog merely by being listed here; converting any
+of them into implementation is a separate, later, explicitly-scoped
+decision.
+
 **Terminology note:** per the Observation Review, this document does
 not use "Tier 1"/"Tier 2" language, even though ADR 0005-0007 do. Those
 ADRs are preserved unmodified as historical evidence of how the

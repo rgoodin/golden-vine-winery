@@ -12,6 +12,21 @@ OB-0021, OB-0022, OB-0023, and `docs/devex/lessons-learned.md` LL-0009,
 LL-0014, LL-0017, LL-0018. This document reconstructs the evidence
 chain concisely and cites those records rather than repeating them.
 
+> **Phase 2 Observation Review note:** the "Tier 1"/"Tier 2" framing
+> below represents the architectural conclusion Developer #1 reached
+> during implementation, using the terminology and reasoning available
+> at that point in the project. It is preserved here unmodified as the
+> accurate historical record of that reasoning.
+>
+> The subsequent human-led Observation Review determined that this
+> terminology should not become the Golden Path's general reliability
+> model — not because the underlying guarantee analysis was wrong, but
+> because "Tier 1/Tier 2" doesn't generalize as language the way the
+> evidence-backed guarantee itself does. See
+> `docs/devex/phase-2-observation-review.md`, Finding 12, for the
+> replacement framing and the reasoning behind not rewriting this ADR
+> to match it.
+
 ## Context
 
 ### The question
