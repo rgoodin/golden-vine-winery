@@ -270,10 +270,35 @@ code was **not** touched or generalized — one target remains
 insufficient evidence for a target-adapter interface
 (`docs/golden-path/0002-design-principles.md`).
 
+**Phase 5 (Second Consumer) is done — `services/document-workspace-service/`,
+Salesforce → SharePoint, built live against real Microsoft 365/SharePoint,
+not simulated.** Both Golden Path packages were imported with **zero
+code changes** and verified working against a target neither has ever
+seen before: normal processing, concurrent-initial-processing
+protection, and all three recovery cases, all independently confirmed
+against a real SharePoint site — see
+`docs/devex/developer-2-observations.md` for the full evaluation
+(sufficient), what transferred unchanged, what this target forced to
+be reinvented (there is no SharePoint equivalent of ServiceNow's
+`correlation_id` field — see `src/sharepoint/workspaceFolderName.ts`),
+and the real setup friction encountered along the way
+(`docs/devex/friction-log.md` FL-0032, FL-0033;
+`docs/devex/observations.md` OB-0032). Auth setup:
+`docs/decisions/0008-sharepoint-authentication.md`,
+`docs/runbooks/sharepoint-non-interactive-auth-setup.md`. No scheduled
+audit tooling exists for this target — deliberately out of scope, not
+an oversight (see that service's README).
+
 A Salesforce Developer Edition org (External Client App, JWT Bearer Flow)
 and a ServiceNow Developer Instance (Client Credentials grant, dedicated
 `itil`-role user) have been set up for testing; credentials live in
-`services/integration-service/.env` (gitignored, not in this repo).
+`services/integration-service/.env` (gitignored, not in this repo). A
+Microsoft 365 Business Basic trial tenant and a dedicated Azure AD app
+registration (`Sites.Selected`, scoped to one SharePoint site) were set
+up the same way for `services/document-workspace-service/`; credentials
+live in that service's own `.env` (also gitignored). See
+`docs/devex/friction-log.md` FL-0032 for the trial's conversion date —
+not tracked automatically anywhere in this repository.
 
 Commands:
 
@@ -304,10 +329,23 @@ root runs all of it in well under a second. The existing
 exactly as they were - deliberately manual, live-system verification
 against real Salesforce/ServiceNow, not folded into `npm test` and not
 replaced by it. There is still no lint tooling — do not invent commands
-for that.
-No other services exist yet. When more are added, or lint tooling is
-introduced, update this section with the real commands and architecture
-rather than the aspirational structure sketched later in this file.
+for that. The same suite exists for `services/document-workspace-service/`
+(`toCanonicalEvent()`'s mapping, `folderNameFor()`'s naming/sanitization) -
+`npm test` from the repository root runs both services' suites together.
+
+`services/document-workspace-service/` has the same command shape, from
+that directory: `npm run dev`, `npm run build`, `npm start`,
+`npm run test-production-concurrent-idempotency`,
+`npm run test-production-recovery`. It has no `publish-test-event`
+script of its own - it deliberately reuses `integration-service`'s, to
+exercise real Salesforce Pub/Sub broadcast semantics across two
+independent services rather than duplicate a script. It also has no
+`detect-unprocessed-events`/scheduled-audit equivalent - not built this
+round, see `docs/devex/developer-2-observations.md`.
+
+If lint tooling is introduced, update this section with the real
+commands and architecture rather than the aspirational structure
+sketched later in this file.
 
 # Golden Vine Integration Golden Path
 
@@ -826,7 +864,7 @@ not a violation to correct.
 
 Do not create the entire repository structure prematurely.
 
-Current structure (as of the first Golden Path Enablement slice):
+Current structure (as of the Phase 5 Second Consumer exercise):
 
     .
     ├── package.json           # npm workspace root
@@ -842,7 +880,8 @@ Current structure (as of the first Golden Path Enablement slice):
     │   ├── reliability/
     │   └── salesforce-transport/
     └── services/
-        └── integration-service/
+        ├── integration-service/          # Developer #1: Salesforce -> ServiceNow
+        └── document-workspace-service/   # Developer #2: Salesforce -> SharePoint
 
 A further-future structure may still add:
 

@@ -1780,4 +1780,54 @@ point is whichever round chooses to analyze accumulated
 
 ---
 
+### OB-0032: A real Microsoft 365 tenant, SharePoint site, and least-privilege Azure AD app registration are live — Developer #2's Configure step, done, not simulated
+
+**Date:** 2026-09-18
+**Phase:** Phase 5 — Second Consumer (Salesforce → SharePoint)
+**Category:** environment setup / authentication / secrets
+
+Per the "all the way live" scoping decision, Developer #2's Configure
+step was performed against real Microsoft services, not stubbed:
+
+- **Tenant:** a Microsoft 365 Business Basic trial (`goodintechnologysolutions.onmicrosoft.com`),
+  provisioned after the Developer Program path was found ineligible
+  (FL-0032). MFA configured on the admin account.
+- **SharePoint site:** `Distributor Workspaces`
+  (`/sites/DistributorWorkspaces`), a Standard-template Team site with
+  its default Documents library — created specifically for this
+  integration rather than reusing the tenant's default site, so the
+  least-privilege app-permission grant below has a single, deliberate
+  target. Site's Graph composite ID confirmed via the SharePoint REST
+  API (`_api/site/id` + `_api/web/id`, composed as
+  `<hostname>,<site-collection-id>,<web-id>`) once the modern SharePoint
+  REST/Graph ID mismatch was worked around.
+- **Azure AD app registration:** `Golden Vine Document Workspace
+  Service`, single-tenant, with a client secret (180-day expiry) and
+  the Microsoft Graph **application** permission `Sites.Selected`
+  (admin-consented at the tenant level).
+- **Site-level grant:** the app was given `write` access to exactly the
+  `Distributor Workspaces` site via `POST /sites/{id}/permissions`
+  (`grantedToIdentities` → this app's id/displayName), run through
+  Graph Explorer under a delegated `Sites.FullControl.All` consent held
+  only for this one bootstrap call (FL-0033). Confirmed via the live
+  `201 Created` response, not assumed from the request succeeding
+  silently.
+
+This is the direct SharePoint analog of ADR 0004's ServiceNow
+Client-Credentials setup: a dedicated, narrowly-scoped machine identity,
+not a shared or administrative one. Two real asymmetries with the
+Salesforce/ServiceNow setups were surfaced doing this, not anticipated
+in advance — see FL-0032 (Developer Program eligibility) and FL-0033
+(the `Sites.FullControl.All` bootstrap requirement) for what they were
+and why they mattered.
+
+**What this round did not do:** write any service code, choose the
+distributor-folder naming/identity scheme, or decide anything about
+reconciliation or reliability behavior for this target — those are
+Create-step decisions, not Configure-step ones, and are explicitly
+deferred to keep this observation about the environment, not the
+integration logic.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

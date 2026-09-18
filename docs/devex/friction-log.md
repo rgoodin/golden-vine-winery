@@ -1638,4 +1638,101 @@ look for until it actually mattered.
 
 ---
 
+### FL-0033: Granting an app access to one SharePoint site requires a broad, tenant-wide delegated permission most developers won't want to keep
+
+**Date:** 2026-09-18
+**Phase:** Phase 5 — Second Consumer (Salesforce → SharePoint)
+
+#### Observation
+
+Developer #2 needed the new `Golden Vine Document Workspace Service`
+Azure AD app registration to have write access to exactly one
+SharePoint site (`Distributor Workspaces`) — the least-privilege
+equivalent of ADR 0004's dedicated `itil`-role ServiceNow user, not
+tenant-wide `Sites.ReadWrite.All`.
+
+#### Friction
+
+The least-privilege *application* permission (`Sites.Selected`) exists,
+but activating it for one specific site requires a one-time
+`POST /sites/{id}/permissions` call, and that call itself can only be
+made with a **delegated** token holding `Sites.FullControl.All` —
+there is no narrower delegated scope that authorizes this operation
+(`Sites.Manage.All` does not cover it). So the very act of *narrowing*
+the new app's access to one site required a human admin to temporarily
+hold the broadest possible SharePoint delegated permission in Graph
+Explorer. Salesforce's JWT Bearer setup and ServiceNow's Client
+Credentials setup (ADR 0002, ADR 0004) had no equivalent bootstrapping
+step — each platform's own admin console let the scoped, least-privilege
+credential be created directly, with no broader permission required
+even momentarily.
+
+#### Impact
+
+Extra setup step, and a moment of real risk-acceptance a developer
+following a runbook casually might not notice: consenting to
+`Sites.FullControl.All`, even briefly, is a materially bigger grant than
+the thing being accomplished. It also could not be done by an
+automated agent alone — Graph Explorer's sign-in flow is a browser
+popup outside what browser-automation tooling could drive, so a human
+had to click "Sign in" and "Consent" themselves (see
+`docs/runbooks/sharepoint-non-interactive-auth-setup.md`).
+
+#### Possible Enablement
+
+Not decided here. Worth the Dojo considering: whether this bootstrap
+step belongs in a runbook checklist only (current state) or whether a
+scripted alternative (e.g. PnP PowerShell's app-only bootstrapping, or
+a one-time delegated-auth CLI helper) would reduce the exposure window
+without adding permanent tooling weight to a project with only one
+SharePoint consumer so far.
+
+---
+
+### FL-0032: The Microsoft 365 Developer Program is no longer free for everyone — a real platform-access blocker discovered live, not assumed
+
+**Date:** 2026-09-18
+**Phase:** Phase 5 — Second Consumer (Salesforce → SharePoint)
+
+#### Observation
+
+Before writing any SharePoint integration code, Developer #2 needed a
+real Microsoft 365 tenant with SharePoint to build against — the
+"all the way live" scoping decision for this exercise. The Microsoft
+365 Developer Program was the obvious first choice: it has historically
+provisioned a free, full-featured (E5) sandbox tenant for exactly this
+kind of development work.
+
+#### Friction
+
+Signing in to the Developer Program dashboard produced: "You don't
+currently qualify for a Microsoft 365 Developer Program sandbox
+subscription." The program's own FAQ confirmed this is not account
+misconfiguration — self-service enrollment now requires one of: an
+eligible Visual Studio Professional/Enterprise subscription, ISV
+Success/Microsoft AI Cloud Partner Program membership, or a Premier/
+Unified Support contract. A personal Microsoft account with none of
+those no longer qualifies, a change from this program's earlier,
+open-to-any-developer model. This was discovered by actually attempting
+enrollment, not by reading documentation in advance.
+
+#### Impact
+
+The originally assumed path to a live SharePoint site was a dead end
+for this project's account. Required a real-time pivot, mid-session, to
+a different provisioning path (a genuine Microsoft 365 Business Basic
+trial, which does provision a real tenant + SharePoint, but requires a
+credit card and converts to a paid subscription after one month unless
+canceled — a materially different cost/commitment shape than the
+Developer Program's free, renewable sandbox).
+
+#### Possible Enablement
+
+Not decided here. Worth recording for any future developer repeating
+this exercise: don't assume Developer Program eligibility — verify it
+first, before scoping "go live" work around it. `docs/runbooks/sharepoint-non-interactive-auth-setup.md`
+documents the trial-signup path actually used.
+
+---
+
 <!-- Add new entries above this line, most recent first. -->

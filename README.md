@@ -30,9 +30,12 @@ ServiceNow
 Operational / IT / Compliance Tasks
 ```
 
-The first integration built is **Salesforce → Integration Service →
-ServiceNow**. SharePoint is intentionally deferred until that first
-integration has produced enough observations to identify reusable patterns.
+The first integration built was **Salesforce → Integration Service →
+ServiceNow**, deliberately built manually first to produce enough
+observations to identify reusable patterns before generalizing
+anything. A second, independent integration - **Salesforce → Document
+Workspace Service → SharePoint** - has since been built to test whether
+those patterns actually transfer; see "Status" below.
 
 ## Approach
 
@@ -73,12 +76,14 @@ correlation IDs, testing, CI/CD, IaC, etc.) are documented in
 │       ├── friction-log.md        # Friction items (Observation/Friction/Impact/Enablement)
 │       ├── decisions.md           # Lightweight, working-level decisions
 │       ├── lessons-learned.md     # Synthesized patterns, classified during Phase 2 review
-│       └── phase-2-observation-review.md  # Human-led review checkpoint (findings, not just logs)
+│       ├── phase-2-observation-review.md  # Human-led review checkpoint (findings, not just logs)
+│       └── developer-2-observations.md    # Phase 5 (Second Consumer) evaluation
 ├── packages/                     # Golden Path capability, extracted once proven reusable
 │   ├── reliability/                # golden-path-reliability - durable operation ownership
 │   └── salesforce-transport/       # golden-path-salesforce-transport - Pub/Sub API transport
 └── services/
-    └── integration-service/      # Node.js + TypeScript: Salesforce -> ServiceNow
+    ├── integration-service/          # Node.js + TypeScript: Salesforce -> ServiceNow (Developer #1)
+    └── document-workspace-service/   # Node.js + TypeScript: Salesforce -> SharePoint (Developer #2)
 ```
 
 ## Status
@@ -180,6 +185,19 @@ produced, and
 [`docs/golden-path/0002-design-principles.md`](./docs/golden-path/0002-design-principles.md)
 for why extraction stopped exactly there (no ServiceNow-side
 generalization yet - one target isn't enough evidence).
+
+**Phase 5 (Second Consumer) is done: a genuinely independent second
+integration, Salesforce → SharePoint, built live against a real
+Microsoft 365 tenant** -
+[`services/document-workspace-service/`](./services/document-workspace-service/).
+Both extracted packages were imported unchanged and worked against a
+target neither had seen before - normal processing, concurrent-
+processing protection, and full stale-operation recovery, all
+independently verified against real SharePoint, not just logged. See
+[`docs/devex/developer-2-observations.md`](./docs/devex/developer-2-observations.md)
+for the full evaluation: what transferred as-is, what this target
+forced to be solved fresh (SharePoint has no equivalent of ServiceNow's
+`correlation_id` field), and the real setup friction hit along the way.
 
 See [`CLAUDE.md`](./CLAUDE.md) ("Current Repository State") for the
 up-to-date summary,
